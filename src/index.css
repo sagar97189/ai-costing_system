@@ -1,0 +1,22 @@
+@import url('https://fonts.googleapis.com/css2?family=Anton&family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body {
+    @apply m-0 min-w-[320px] bg-ice-950 text-powder antialiased font-mono;
+    scroll-behavior: smooth;
+  }
+  
+  /* Applying the global dotted technical texture */
+  body {
+    @apply bg-dotted-tech bg-[size:14px_14px,_100%_100%,_100%_100%];
+    background-attachment: fixed;
+  }
+  
+  img {
+    @apply block max-w-full;
+  }
+}
