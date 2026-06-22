@@ -14,13 +14,25 @@ function Header() {
       </div>
 
       <nav className="hidden md:flex items-center gap-6 bg-ice-900/60 backdrop-blur-md px-6 py-2 rounded-full text-xs font-mono uppercase tracking-wider border border-white/5">
-        <a href="#features" className="hover:text-signal transition-colors">Features</a>
-        <a href="#lookbook" className="hover:text-signal transition-colors">Lookbook</a>
-        <a href="#api" className="hover:text-signal transition-colors">API Specs</a>
+        <a href="#home" className="hover:text-signal transition-colors">Home</a>
+        <a href="#products" className="hover:text-signal transition-colors">Products</a>
+        <a href="#contact" className="hover:text-signal transition-colors">Contact Us</a>
       </nav>
 
-      <div className="px-3 py-1.5 md:px-4 md:py-2 text-[10px] md:text-xs uppercase font-mono tracking-wider border border-gear/30 bg-gear/10 text-gear rounded-full">
-        login
+      <div className="flex items-center gap-3">
+        <a
+          href="/login"
+          className="px-5 py-2 rounded-full border border-white/10 text-powder font-mono text-xs uppercase tracking-wider hover:border-signal hover:text-signal transition-all"
+        >
+          Login
+        </a>
+
+        <a
+          href="/signup"
+          className="px-5 py-2 rounded-full bg-gear text-ice-950 font-mono text-xs font-bold uppercase tracking-wider hover:bg-white transition-all"
+        >
+          Sign Up
+        </a>
       </div>
     </header>
   );
@@ -64,7 +76,7 @@ function HeroSection() {
   }, []);
 
   return (
-    <section className="h-screen relative flex flex-col justify-between overflow-hidden bg-[#050d16]">
+    <section id="home" className="h-screen relative flex flex-col justify-between overflow-hidden bg-[#050d16]">
 
       {/* Background Image Carousel */}
       <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden bg-black">
@@ -291,7 +303,7 @@ function FeatureJumpSection() {
   );
 
   return (
-    <section ref={sectionRef} className="h-[820vh] relative bg-ice-950" id="features">
+    <section ref={sectionRef} className="h-[820vh] relative bg-ice-950" id="products">
       <div className="sticky top-0 h-screen w-full overflow-hidden flex flex-col justify-center">
 
         {/* Dynamic Image Sequence Background */}
@@ -383,7 +395,7 @@ function FeatureJumpSection() {
 
 function TiltCard({ item }: { item: any }) {
   const cardRef = useRef<HTMLDivElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
+
   const [rotation, setRotation] = useState({ x: 0, y: 0 });
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -401,23 +413,15 @@ function TiltCard({ item }: { item: any }) {
     setRotation({ x: rotateX, y: rotateY });
   };
 
-  const handleMouseEnter = () => {
-    if (videoRef.current) {
-      videoRef.current.play().catch(() => { });
-    }
-  };
+
 
   const handleMouseLeave = () => {
     setRotation({ x: 0, y: 0 });
-    if (videoRef.current) {
-      videoRef.current.pause();
-    }
   };
 
   return (
     <div
       ref={cardRef}
-      onMouseEnter={handleMouseEnter}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       className="relative group overflow-hidden bg-[#030811] transition-transform duration-200 ease-out cursor-crosshair shadow-2xl w-full aspect-[0.866] hover:z-50"
@@ -427,11 +431,12 @@ function TiltCard({ item }: { item: any }) {
       }}
     >
       <video
-        ref={videoRef}
         src={item.video}
         muted
         loop
+        autoPlay
         playsInline
+        preload="auto"
         className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 opacity-100"
       />
       {/* Lightened overlay to drastically increase visibility as requested */}
@@ -479,30 +484,46 @@ function LookbookSection() {
 
   useLayoutEffect(() => {
     let ctx = gsap.context(() => {
-      // Initialize cards at scale 0
-      gsap.set(cardsRef.current, { scale: 0, opacity: 0 });
+      gsap.set(cardsRef.current, {
+        scale: 0.86,
+        opacity: 0.35,
+        y: 80,
+        rotate: (i) => (i === 0 ? -6 : i === 1 ? 2 : 7),
+      });
 
-      // Create scroll-triggered animation timeline
       const tl = gsap.timeline({
         scrollTrigger: {
           trigger: containerRef.current,
-          start: "center center",
-          end: "+=150%", // How much scroll distance the animation spans
-          pin: true,     // Pin the section while animating
-          scrub: 1,      // Smoothly tie animation to scroll
+          start: "top top",
+          end: "+=180%",
+          pin: true,
+          scrub: 1,
           onUpdate: (self) => {
             setScrollProgress(self.progress);
-          }
-        }
+          },
+        },
       });
 
       tl.to(cardsRef.current, {
         scale: 1,
         opacity: 1,
-        stagger: 0.3, // Animate one by one
+        y: 0,
+        rotate: (i) => (i === 0 ? -4 : i === 1 ? 1 : 4),
+        stagger: 0.22,
         duration: 1,
         ease: "power2.out",
       });
+
+      tl.to(
+        cardsRef.current,
+        {
+          y: (i) => (i === 1 ? -30 : 10),
+          rotate: (i) => (i === 0 ? -7 : i === 1 ? 0 : 7),
+          duration: 1,
+          ease: "none",
+        },
+        ">-0.2"
+      );
     }, containerRef);
 
     return () => ctx.revert();
@@ -515,45 +536,57 @@ function LookbookSection() {
 
   const displayIndex = hoverIndex !== null ? hoverIndex : activeIndex;
 
-  const lines = [
-    "System lookbook",
-    "Processing logic,",
-    "visualized"
-  ];
+  const lines = ["System Preview", "Manufacturing logic,", "visualized"];
 
   return (
-    <section ref={containerRef} className="py-24 md:py-32 relative min-h-screen flex items-center overflow-hidden" id="lookbook">
-      {/* Texture applied via global CSS, this section is transparent so it shows through */}
-      <div className="w-full max-w-[min(1380px,100%)] mx-auto px-[clamp(1rem,3vw,2.25rem)]">
+    <section
+      ref={containerRef}
+      className="relative min-h-screen overflow-hidden bg-ice-950 py-24 md:py-32 flex items-center"
+      id="lookbook"
+    >
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute left-[-10%] top-[10%] w-[28rem] h-[28rem] rounded-full bg-signal/10 blur-[110px]" />
+        <div className="absolute right-[-10%] bottom-[5%] w-[32rem] h-[32rem] rounded-full bg-gear/10 blur-[120px]" />
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(152,245,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(152,245,255,0.04)_1px,transparent_1px)] bg-[size:42px_42px] opacity-30" />
+      </div>
 
-        <h2 className="font-anton uppercase text-[clamp(2.2rem,6vw,4.8rem)] leading-[1.06] max-w-[22ch] mb-16 flex flex-col">
-          {lines.map((line, idx) => (
-            <span
-              key={idx}
-              onMouseEnter={() => setHoverIndex(idx)}
-              onMouseLeave={() => setHoverIndex(null)}
-              className={`transition-all duration-500 cursor-default ${displayIndex === idx ? 'text-powder opacity-100' : 'text-ice-200/30 opacity-50'
-                }`}
-            >
-              {line}
-            </span>
-          ))}
-        </h2>
-
-        <div className="flex flex-col md:flex-row justify-center items-center pb-20 md:pb-40 gap-4 md:gap-4">
-          {LOOKBOOK_ITEMS.map((item, idx) => {
-            return (
-              <div
+      <div className="relative z-10 w-full max-w-[min(1380px,100%)] mx-auto px-[clamp(1rem,3vw,2.25rem)]">
+        <div className="mb-12 md:mb-16 flex flex-col md:flex-row md:items-end md:justify-between gap-8">
+          <h2 className="font-anton uppercase text-[clamp(2.6rem,6vw,5.2rem)] leading-[1.02] max-w-[22ch] flex flex-col">
+            {lines.map((line, idx) => (
+              <span
                 key={idx}
-                ref={(el) => { cardsRef.current[idx] = el; }}
-                className="w-[90%] sm:w-[70%] md:w-[32%] relative z-10"
+                onMouseEnter={() => setHoverIndex(idx)}
+                onMouseLeave={() => setHoverIndex(null)}
+                className={`transition-all duration-500 cursor-default ${displayIndex === idx
+                  ? "text-powder opacity-100"
+                  : "text-ice-200/25 opacity-60"
+                  }`}
               >
-                <TiltCard item={item} />
-              </div>
-            );
-          })}
+                {line}
+              </span>
+            ))}
+          </h2>
+
+          <p className="font-mono text-sm text-ice-200 max-w-md leading-relaxed">
+            A visual preview of how the system reads drawings, converts data into BOM,
+            and supports costing decisions through AI-assisted manufacturing logic.
+          </p>
         </div>
 
+        <div className="relative flex flex-col md:flex-row justify-center items-center pb-12 md:pb-20 gap-6 md:gap-5">
+          {LOOKBOOK_ITEMS.map((item, idx) => (
+            <div
+              key={idx}
+              ref={(el) => {
+                cardsRef.current[idx] = el;
+              }}
+              className="w-[90%] sm:w-[70%] md:w-[32%] relative z-10"
+            >
+              <TiltCard item={item} />
+            </div>
+          ))}
+        </div>
       </div>
     </section>
   );
@@ -570,7 +603,7 @@ function CTASection() {
   ];
 
   return (
-    <section className="relative py-32 md:py-48 overflow-hidden border-t border-white/5 bg-[#030811]">
+    <section id="contact" className="relative py-32 md:py-48 overflow-hidden border-t border-white/5 bg-[#030811]">
       <style>{`
         @keyframes float-slow {
           0% { transform: translateY(0px) rotate(0deg); }
@@ -601,14 +634,14 @@ function CTASection() {
       <div className="relative z-10 w-full max-w-[min(1000px,100%)] mx-auto px-[clamp(1rem,3vw,2.25rem)] text-center flex flex-col items-center">
         <h2 className="font-anton uppercase text-[clamp(2rem,4.5vw,4rem)] leading-[1.1] text-powder drop-shadow-2xl">
           Transform Your Engineering Data <br />
-          Into Instant Quotes With <br />
+          Into Manufactured Product With <br />
           <span className="text-transparent bg-clip-text bg-gradient-to-r from-gear to-signal inline-block mt-4 border border-white/10 px-8 py-2 rounded-2xl bg-[#0a1628]/60 backdrop-blur-md shadow-2xl">
-            Treeline Supply
+            AI Costing
           </span>
         </h2>
 
         <button className="mt-10 flex items-center justify-center gap-3 bg-gear text-ice-950 font-mono font-bold uppercase text-sm tracking-wider px-10 py-4 rounded-full hover:bg-white transition-all duration-300 hover:scale-105 hover:shadow-[0_0_40px_-10px_rgba(152,245,255,0.5)]">
-          <span>Explore API Specs</span>
+          <span>Get Started</span>
           <ArrowRight className="w-5 h-5" />
         </button>
       </div>
