@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useLayoutEffect } from 'react';
-import { ArrowDown, ArrowRight, Mail, CheckCircle2, XCircle, Cpu, Layers } from 'lucide-react';
+import { ArrowRight, CheckCircle2, XCircle, Cpu, Layers } from 'lucide-react';
 import { Footer } from './components/footer/Footer';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
@@ -29,115 +29,51 @@ function Header() {
 
         <a
           href="/signup"
-          className="px-5 py-2 rounded-full bg-gear text-ice-950 font-mono text-xs font-bold uppercase tracking-wider hover:bg-white transition-all"
+          className="relative overflow-hidden group px-5 py-2 rounded-full bg-gear text-ice-950 font-mono text-xs font-bold uppercase tracking-wider hover:bg-white hover:scale-[1.03] active:scale-[0.97] transition-all duration-200"
         >
-          Sign Up
+          <span className="animate-shine" />
+          <span className="relative z-10">Sign Up</span>
         </a>
       </div>
     </header>
   );
 }
 
-const HERO_COPY = [
-  {
-    title: <>Automated Data, <br />Zero Friction</>,
-    desc: "Extract features, BOMs, and dimensions from engineering drawings with our AI engine. Built for fast RFQ turnarounds."
-  },
-  {
-    title: <>Instant Quoting, <br />Maximum Margins</>,
-    desc: "Connect your ERP to our API and turn incoming PDFs directly into actionable pricing models in seconds."
-  },
-  {
-    title: <>Intelligent Routing, <br />No Guesswork</>,
-    desc: "Let AI parse the geometry and instantly route RFQs to the correct machining centers based on tolerances."
-  }
-];
-
-const HERO_IMAGES = [
-  '/assets/animation/hero.jpg',
-  '/assets/animation/hero3 (1).jpg',
-  '/assets/animation/hero3 (2).jpg'
-];
-
 function HeroSection() {
-  const [index, setIndex] = useState(0);
-  const [fade, setFade] = useState(true);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setFade(false); // start fade out
-      setTimeout(() => {
-        setIndex((prev) => (prev + 1) % HERO_COPY.length);
-        setFade(true); // start fade in
-      }, 1000); // Wait for fade out
-    }, 4500); // cycle duration
-
-    return () => clearInterval(interval);
-  }, []);
-
   return (
     <section id="home" className="h-screen relative flex flex-col justify-between overflow-hidden bg-[#050d16]">
 
-      {/* Background Image Carousel */}
+      {/* Background Video */}
       <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden bg-black">
-        {HERO_IMAGES.map((img, i) => (
-          <img
-            key={img}
-            src={img}
-            alt="Hero background"
-            className={`absolute inset-0 w-full h-full object-cover mix-blend-lighten ${index === i ? 'opacity-60' : 'opacity-0'}`}
-            style={{
-              transition: 'opacity 1s ease-in-out, transform 8s ease-out',
-              transform: index === i ? 'scale(1.15)' : 'scale(1)'
-            }}
-          />
-        ))}
+        <video
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="auto"
+          poster="/assets/animation/hero.jpg"
+          className="absolute inset-0 w-full h-full object-cover mix-blend-lighten opacity-60"
+        >
+          <source src="/assets/animation/anime.mp4" type="video/mp4" />
+        </video>
       </div>
 
-      <div className="relative z-10 flex-1 flex flex-col items-start justify-center w-full max-w-[min(1380px,100%)] mx-auto px-[clamp(1rem,3vw,2.25rem)] text-left">
-        <div className={`transition-all duration-1000 ease-[cubic-bezier(0.2,0.8,0.2,1)] transform ${fade ? 'opacity-100 translate-y-0 scale-100 blur-none' : 'opacity-0 translate-y-12 scale-[1.03] blur-md'}`}>
-          <h1 className="font-anton uppercase text-[clamp(3rem,7.8vw,6.6rem)] leading-[1.06] max-w-4xl text-powder drop-shadow-2xl relative group cursor-crosshair text-left">
-            <span className="relative inline-block text-left">
-              <span className="inline-block text-left transition-opacity duration-300 group-hover:opacity-0">
-                {HERO_COPY[index].title}
-              </span>
-
-              {/* Shattered Pieces */}
-              <span
-                className="absolute inset-0 text-left text-powder opacity-0 group-hover:opacity-100 transition-all duration-[400ms] ease-[cubic-bezier(0.175,0.885,0.32,1.275)] transform group-hover:-translate-x-[2%] group-hover:-translate-y-[4%] group-hover:rotate-[-2deg]"
-                style={{ clipPath: 'polygon(0 0, 55% 0, 45% 50%, 35% 100%, 0 100%)' }}
-                aria-hidden="true"
-              >
-                {HERO_COPY[index].title}
-              </span>
-              <span
-                className="absolute inset-0 text-left text-powder opacity-0 group-hover:opacity-100 transition-all duration-[500ms] ease-[cubic-bezier(0.175,0.885,0.32,1.275)] transform group-hover:translate-x-[3%] group-hover:-translate-y-[2%] group-hover:rotate-[2deg]"
-                style={{ clipPath: 'polygon(55% 0, 100% 0, 100% 45%, 45% 50%)' }}
-                aria-hidden="true"
-              >
-                {HERO_COPY[index].title}
-              </span>
-              <span
-                className="absolute inset-0 text-left text-powder opacity-0 group-hover:opacity-100 transition-all duration-[450ms] ease-[cubic-bezier(0.175,0.885,0.32,1.275)] transform group-hover:translate-x-[1%] group-hover:translate-y-[4%] group-hover:rotate-[1deg]"
-                style={{ clipPath: 'polygon(45% 50%, 100% 45%, 100% 100%, 35% 100%)' }}
-                aria-hidden="true"
-              >
-                {HERO_COPY[index].title}
-              </span>
-            </span>
+      <div className="relative z-10 flex-1 flex flex-col items-center justify-center w-full max-w-[min(1380px,100%)] mx-auto px-[clamp(1rem,3vw,2.25rem)] text-center">
+        <div className="w-full flex flex-col items-center text-center">
+          <h1 className="font-sans font-extrabold tracking-tight text-[clamp(2.5rem,6vw,5.5rem)] leading-[1.1] max-w-4xl text-powder drop-shadow-2xl text-center mx-auto">
+            Extract engineering data and estimate costs, fast.
           </h1>
-          <p className="mt-6 font-mono text-ice-200 max-w-lg text-sm md:text-base leading-relaxed transition-opacity duration-1000 delay-100">
-            {HERO_COPY[index].desc}
+          <p className="mt-6 font-sans text-ice-200/80 max-w-2xl mx-auto text-base md:text-lg leading-relaxed">
+            Amanzi is an AI costing engine for extracting features, BOMs, and dimensions from engineering drawings with zero friction. Built for fast RFQ turnarounds.
           </p>
-          <div className="mt-8 transition-opacity duration-1000 delay-200">
-            <button className="px-5 py-2 md:px-6 md:py-2.5 text-xs md:text-sm uppercase font-mono tracking-wider border border-gear/30 bg-gear/10 text-gear rounded-full hover:bg-gear/20 transition-colors">
-              Get Started
+          <div className="mt-8 flex justify-center w-full">
+            <button className="relative overflow-hidden group px-5 py-2 md:px-6 md:py-2.5 text-xs md:text-sm uppercase font-mono tracking-wider border border-gear/30 bg-gear/10 text-gear rounded-full hover:bg-gear/20 hover:scale-[1.03] active:scale-[0.97] transition-all duration-200">
+              <span className="animate-shine" />
+              <span className="relative z-10">Get Started</span>
             </button>
           </div>
         </div>
       </div>
-
-
 
       <div className="absolute inset-0 pointer-events-none bg-gradient-to-b from-ice-950/40 via-transparent to-ice-950/80 z-0 mix-blend-multiply" />
     </section>

@@ -1,4 +1,4 @@
-import React from 'react';
+
 
 const ICONS = ['LinkedIn', 'GitHub', 'Instagram', 'X', 'YouTube', 'Discord'];
 

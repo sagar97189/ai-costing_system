@@ -6,8 +6,8 @@ export function AnimatedLogo() {
   const textWrapperRef = useRef<HTMLDivElement>(null);
   const filledTextRef = useRef<HTMLSpanElement>(null);
 
-  const xTo = useRef<gsap.QuickToFunc>();
-  const yTo = useRef<gsap.QuickToFunc>();
+  const xTo = useRef<gsap.QuickToFunc | null>(null);
+  const yTo = useRef<gsap.QuickToFunc | null>(null);
 
   useEffect(() => {
     if (!filledTextRef.current) return;

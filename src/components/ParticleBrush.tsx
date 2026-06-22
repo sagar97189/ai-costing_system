@@ -1,5 +1,5 @@
 import React, { useRef, useMemo, useEffect, useState } from 'react';
-import { Canvas, useFrame, useThree, createPortal } from '@react-three/fiber';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 
 const SIMULATION_VERTEX_SHADER = `
@@ -253,7 +253,6 @@ const GPGPU = ({ size, maskTexture, mouseTarget }: { size: number, maskTexture: 
     simMaterial.uniforms.uMouse.value.lerp(mouseTarget.current, 0.1);
     
     // Render simulation
-    const currentTarget = pingPong.current % 2 === 0 ? targetA : targetB;
     const nextTarget = pingPong.current % 2 === 0 ? targetB : targetA;
     
     gl.setRenderTarget(nextTarget);
