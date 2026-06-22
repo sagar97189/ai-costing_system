@@ -134,28 +134,60 @@ function HeroSection() {
 
 const FEATURE_ITEMS = [
   {
-    name: 'Geometry Parser v2',
-    type: 'Extraction',
-    detail: 'Identifies holes, bends, and tolerances directly from PDF blueprints with 99.8% accuracy.',
-    stat: '< 2.4s per drawing',
+    name: "RFQ Management",
+    type: "Input",
+    detail:
+      "Capture customer RFQs, quantities, delivery requirements, customer details, and attached engineering drawings in one structured workflow.",
+    stat: "RFQ → Structured Request",
   },
   {
-    name: 'BOM Compiler',
-    type: 'Data',
-    detail: 'Automatically generates hierarchical bill of materials from assembly drawings.',
-    stat: 'XLSX / CSV Export',
+    name: "ED Extraction",
+    type: "AI Drawing Reading",
+    detail:
+      "AI reads engineering drawings and extracts dimensions, materials, tolerances, notes, child parts, and manufacturing details.",
+    stat: "Drawing → Extracted Data",
   },
   {
-    name: 'Auto-Costing Engine',
-    type: 'Pricing',
-    detail: 'Maps extracted geometry to your machine shop rates to generate instant quotes.',
-    stat: 'API Ready',
+    name: "Standard ED Mapping",
+    type: "Normalization",
+    detail:
+      "Different customer drawing styles are converted into one internal standard ED format for comparison, validation, and approval.",
+    stat: "Customer ED → Standard ED",
   },
   {
-    name: 'Material Detector',
-    type: 'Analysis',
-    detail: 'Cross-references title blocks and notes to isolate material requirements and finish specs.',
-    stat: '150+ Alloys Mapped',
+    name: "BOM Generation",
+    type: "Bill of Materials",
+    detail:
+      "Generate parent-child BOM structures from assemblies, ballooned drawings, child parts, quantities, and extracted part details.",
+    stat: "Assembly → Multi-Level BOM",
+  },
+  {
+    name: "Part Master Matching",
+    type: "Similarity Search",
+    detail:
+      "Use embeddings and similarity search to detect duplicate or similar parts before creating a new master part record.",
+    stat: "Duplicate Reduction",
+  },
+  {
+    name: "Routing Management",
+    type: "Operations",
+    detail:
+      "Map operation sequences, machines, setup time, cycle time, alternate routing, wastage, and process-level manufacturing logic.",
+    stat: "Part → Routing Plan",
+  },
+  {
+    name: "Manufacturing Intelligence",
+    type: "Production Logic",
+    detail:
+      "Connect BOM, routing, machine usage, labor, tooling, rejection, overhead, and wastage into one manufacturing costing flow.",
+    stat: "BOM + Routing + Machine",
+  },
+  {
+    name: "AI Cost Estimation",
+    type: "Costing Engine",
+    detail:
+      "Estimate material, machine, labor, power, tooling, rejection, overhead, and wastage cost to support faster quotation decisions.",
+    stat: "RFQ → Estimated Cost",
   },
 ];
 
@@ -259,7 +291,7 @@ function FeatureJumpSection() {
   );
 
   return (
-    <section ref={sectionRef} className="h-[480vh] relative bg-ice-950" id="features">
+    <section ref={sectionRef} className="h-[820vh] relative bg-ice-950" id="features">
       <div className="sticky top-0 h-screen w-full overflow-hidden flex flex-col justify-center">
 
         {/* Dynamic Image Sequence Background */}
@@ -286,13 +318,17 @@ function FeatureJumpSection() {
 
           {/* Left Copy */}
           <div>
-            <h2 className="font-anton uppercase text-[clamp(2.5rem,5vw,4.5rem)] leading-[1.06] text-powder mb-6">
-              Review the Pipeline <br />
-              <span className="text-ice-800" style={{ WebkitTextStroke: '1px #98f5ff' }}>Data that</span><br />
-              builds quotes
+            <h2 className="font-anton uppercase text-[clamp(3rem,6vw,5.5rem)] leading-[1.02] text-powder mb-6">
+              From RFQ <br />
+              <span className="text-ice-800" style={{ WebkitTextStroke: '1px #98f5ff' }}>
+                to Costing
+              </span>
+              <br />
+              with AI
             </h2>
             <p className="font-mono text-ice-200 max-w-sm text-sm leading-relaxed">
-              The extraction sequence acts as a digital engineer: each step brings one layer of the drawing into focus before processing.
+              Each scroll step highlights one major function of the AI-assisted manufacturing costing system,
+              from customer request to engineer-approved cost estimation.
             </p>
           </div>
 
