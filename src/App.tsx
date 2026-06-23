@@ -54,7 +54,7 @@ function HeroSection() {
           poster="/assets/animation/hero.jpg"
           className="absolute inset-0 w-full h-full object-cover mix-blend-lighten opacity-60"
         >
-          <source src="/assets/animation/anime.mp4" type="video/mp4" />
+          <source src="/assets/animation/anime1.mp4" type="video/mp4" />
         </video>
       </div>
 
