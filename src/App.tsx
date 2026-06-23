@@ -417,7 +417,7 @@ const LOOKBOOK_ITEMS = [
 function LookbookSection() {
   const containerRef = useRef<HTMLElement>(null);
   const cardsRef = useRef<(HTMLDivElement | null)[]>([]);
-  const [scrollProgress, setScrollProgress] = useState(0);
+  const [activeIndex, setActiveIndex] = useState(0);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
   useLayoutEffect(() => {
@@ -432,45 +432,55 @@ function LookbookSection() {
       const tl = gsap.timeline({
         scrollTrigger: {
           trigger: containerRef.current,
-          start: "top top",
-          end: "+=180%",
-          pin: true,
-          scrub: 1,
-          onUpdate: (self) => {
-            setScrollProgress(self.progress);
-          },
+          start: "top 65%",
+          toggleActions: "play none none reverse",
         },
       });
 
-      tl.to(cardsRef.current, {
+      tl.to(cardsRef.current[0], {
         scale: 1,
         opacity: 1,
         y: 0,
-        rotate: (i) => (i === 0 ? -4 : i === 1 ? 1 : 4),
-        stagger: 0.22,
-        duration: 1,
+        rotate: -4,
+        duration: 0.5,
         ease: "power2.out",
+        onStart: () => setActiveIndex(0),
       });
+
+      tl.to(cardsRef.current[1], {
+        scale: 1,
+        opacity: 1,
+        y: 0,
+        rotate: 1,
+        duration: 0.5,
+        ease: "power2.out",
+        onStart: () => setActiveIndex(1),
+      }, ">");
+
+      tl.to(cardsRef.current[2], {
+        scale: 1,
+        opacity: 1,
+        y: 0,
+        rotate: 4,
+        duration: 0.5,
+        ease: "power2.out",
+        onStart: () => setActiveIndex(2),
+      }, ">");
 
       tl.to(
         cardsRef.current,
         {
           y: (i) => (i === 1 ? -30 : 10),
           rotate: (i) => (i === 0 ? -7 : i === 1 ? 0 : 7),
-          duration: 1,
-          ease: "none",
+          duration: 0.5,
+          ease: "power2.out",
         },
-        ">-0.2"
+        ">"
       );
     }, containerRef);
 
     return () => ctx.revert();
   }, []);
-
-  let activeIndex = 0;
-  if (scrollProgress < 0.33) activeIndex = 0;
-  else if (scrollProgress < 0.66) activeIndex = 1;
-  else activeIndex = 2;
 
   const displayIndex = hoverIndex !== null ? hoverIndex : activeIndex;
 
