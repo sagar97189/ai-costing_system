@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, useLayoutEffect } from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { ArrowRight, CheckCircle2, XCircle, Cpu, Layers } from 'lucide-react';
+import Login from './pages/Login';
 import { Footer } from './components/footer/Footer';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
@@ -668,7 +670,7 @@ function ComparisonSection() {
   );
 }
 
-function App() {
+function LandingPage() {
   return (
     <div className="bg-ice-950 min-h-screen relative selection:bg-signal selection:text-ice-950">
       <Header />
@@ -681,6 +683,17 @@ function App() {
       </main>
       <Footer />
     </div>
+  );
+}
+
+function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/login" element={<Login />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
 
