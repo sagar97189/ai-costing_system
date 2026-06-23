@@ -32,7 +32,7 @@ const FormInput = ({ icon: Icon, type, placeholder, label, delay }: { icon: any,
 
 const LoginForm = ({ onSwitch }: { onSwitch: () => void }) => {
   return (
-    <div className="flex flex-col h-full w-full max-w-[340px] mx-auto justify-center">
+    <div className="flex flex-col h-auto w-full max-w-[390px] mx-auto justify-center rounded-[2rem] border border-white/15 bg-white/10 backdrop-blur-2xl px-8 py-10 shadow-[0_30px_100px_rgba(0,0,0,0.45)]">
       <motion.div
         initial={{ opacity: 0, y: 15, filter: 'blur(10px)' }}
         animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
@@ -50,7 +50,8 @@ const LoginForm = ({ onSwitch }: { onSwitch: () => void }) => {
         <p className="text-slate-400 text-sm">Sign in to continue to your account</p>
       </motion.div>
 
-      <form className="space-y-4" onSubmit={(e) => e.preventDefault()}>
+      {/* <form className="space-y-4" onSubmit={(e) => e.preventDefault()}> */}
+      <form className="w-full bg-white/10 border border-white/10 focus:border-blue-400/60 focus:bg-white/15 focus:ring-1 focus:ring-blue-400/40 rounded-xl py-3 pl-10 pr-10 text-sm text-white placeholder-slate-400 transition-all duration-300 outline-none" onSubmit={(e) => e.preventDefault()}>
         <FormInput icon={Mail} type="email" placeholder="Enter your email" label="Email address" delay={0.1} />
         <FormInput icon={Lock} type="password" placeholder="Enter your password" label="Password" delay={0.15} />
 
@@ -91,53 +92,69 @@ const LoginForm = ({ onSwitch }: { onSwitch: () => void }) => {
 
 const SignupForm = ({ onSwitch }: { onSwitch: () => void }) => {
   return (
-    <div className="flex flex-col h-full w-full max-w-[340px] mx-auto justify-center">
+    <div className="flex flex-col h-auto w-full max-w-[370px] mx-auto justify-center rounded-[1.75rem] border border-white/15 bg-white/10 backdrop-blur-2xl px-6 py-6 shadow-[0_30px_100px_rgba(0,0,0,0.45)]">
       <motion.div
         initial={{ opacity: 0, y: 15, filter: 'blur(10px)' }}
         animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
         exit={{ opacity: 0, y: -15, filter: 'blur(10px)' }}
         transition={{ duration: 0.5, ease: 'easeOut' }}
-        className="mb-8"
+        className="mb-5"
       >
-        <div className="flex items-center gap-2 mb-8">
+        <div className="flex items-center gap-2 mb-5">
           <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-[0_0_15px_rgba(139,92,246,0.5)]">
             <Hexagon className="w-5 h-5 text-white" />
           </div>
           <span className="font-sans font-bold text-xl text-white tracking-tight">Amanzi</span>
         </div>
-        <h2 className="text-[32px] font-bold text-white mb-2 tracking-tight leading-tight">Create Account</h2>
+
+        <h2 className="text-[30px] font-bold text-white mb-1 tracking-tight leading-tight">
+          Create Account
+        </h2>
         <p className="text-slate-400 text-sm">Join us and start estimating costs fast.</p>
       </motion.div>
 
       <form className="space-y-4" onSubmit={(e) => e.preventDefault()}>
-        <FormInput icon={User} type="text" placeholder="John Doe" label="Full Name" delay={0.05} />
-        <FormInput icon={Mail} type="email" placeholder="Enter your email" label="Email address" delay={0.1} />
-        <FormInput icon={Lock} type="password" placeholder="Create a password" label="Password" delay={0.15} />
+        <div className="rounded-[1.35rem] border border-white/15 bg-white/10 backdrop-blur-xl px-5 py-5 space-y-3">
+          <FormInput icon={User} type="text" placeholder="John Doe" label="Full Name" delay={0.05} />
+          <FormInput icon={Mail} type="email" placeholder="Enter your email" label="Email address" delay={0.1} />
+          <FormInput icon={Lock} type="password" placeholder="Create a password" label="Password" delay={0.15} />
 
-        <motion.div
-          initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ delay: 0.2 }}
-          className="flex items-center gap-2 pt-1 pb-2"
-        >
-          <label className="flex items-center gap-2 text-[13px] text-slate-400 cursor-pointer group">
-            <div className="relative w-4 h-4 rounded border border-white/10 bg-slate-900/50 group-hover:border-white/30 transition-colors flex items-center justify-center" />
-            I agree to the Terms & Conditions
-          </label>
-        </motion.div>
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ delay: 0.2 }}
+            className="flex items-center gap-2 pt-1"
+          >
+            <label className="flex items-center gap-2 text-[12px] text-slate-400 cursor-pointer group">
+              <div className="relative w-4 h-4 rounded border border-white/10 bg-slate-900/50 group-hover:border-white/30 transition-colors flex items-center justify-center" />
+              I agree to the Terms & Conditions
+            </label>
+          </motion.div>
+        </div>
 
         <motion.button
           layoutId="auth-submit-btn"
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
-          initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ delay: 0.25 }}
-          className="w-full relative group overflow-hidden bg-white text-[#030811] hover:bg-slate-200 font-bold text-[15px] py-3.5 rounded-xl transition-all shadow-[0_0_20px_rgba(255,255,255,0.2)] mt-2"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -10 }}
+          transition={{ delay: 0.25 }}
+          className="w-full relative group overflow-hidden bg-white text-[#030811] hover:bg-slate-200 font-bold text-[15px] py-3 rounded-xl transition-all shadow-[0_0_20px_rgba(255,255,255,0.2)]"
         >
-          <span className="relative z-10 flex items-center justify-center gap-2">Sign up <ArrowRight className="w-4 h-4" /></span>
+          <span className="relative z-10 flex items-center justify-center gap-2">
+            Sign up <ArrowRight className="w-4 h-4" />
+          </span>
         </motion.button>
       </form>
 
       <motion.div
-        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ delay: 0.3 }}
-        className="mt-8 text-center text-[13px] text-slate-400"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ delay: 0.3 }}
+        className="mt-5 text-center text-[13px] text-slate-400"
       >
         Already have an account?{' '}
         <button type="button" onClick={onSwitch} className="text-white hover:text-slate-200 font-medium transition-colors">
