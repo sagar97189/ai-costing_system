@@ -277,7 +277,7 @@ const LoginForm = ({ onSwitchToSignup, onSwitchToForgot }: { onSwitchToSignup: (
         localStorage.setItem('token', data.token);
         localStorage.setItem('user', JSON.stringify(data.user));
         alert('Logged in successfully! Welcome ' + data.user.name);
-        window.location.href = "/";
+        window.location.href = "/dashboard";
       }
     } catch (err) {
       setError('Network error. Is the backend running?');

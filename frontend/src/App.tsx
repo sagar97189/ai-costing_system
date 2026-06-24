@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useLayoutEffect } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { ArrowRight, CheckCircle2, XCircle, Cpu, Layers } from 'lucide-react';
 import Login from './pages/Login';
+import Dashboard from './pages/Dashboard';
 import { Footer } from './components/footer/Footer';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
@@ -9,26 +10,6 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger';
 gsap.registerPlugin(ScrollTrigger);
 
 function Header() {
-  const [user, setUser] = useState<{ name: string } | null>(null);
-
-  useEffect(() => {
-    const savedUser = localStorage.getItem('user');
-    if (savedUser) {
-      try {
-        setUser(JSON.parse(savedUser));
-      } catch (e) {
-        localStorage.removeItem('user');
-      }
-    }
-  }, []);
-
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    setUser(null);
-    window.location.reload();
-  };
-
   return (
     <header className="fixed top-0 left-0 w-full z-40 px-4 py-[0.85rem] md:px-7 md:py-4 flex items-center justify-between bg-gradient-to-b from-[#06111f] to-transparent">
       <div className="font-anton uppercase text-[clamp(0.92rem,1.5vw,1.25rem)] tracking-[0.08em] text-powder">
@@ -42,36 +23,20 @@ function Header() {
       </nav>
 
       <div className="flex items-center gap-3">
-        {user ? (
-          <>
-            <span className="text-powder font-mono text-xs uppercase tracking-wider px-3 py-2">
-              Hi, {user.name}
-            </span>
-            <button
-              onClick={handleLogout}
-              className="px-5 py-2 rounded-full border border-white/10 text-powder font-mono text-xs uppercase tracking-wider hover:border-red-500 hover:text-red-500 transition-all cursor-pointer"
-            >
-              Logout
-            </button>
-          </>
-        ) : (
-          <>
-            <a
-              href="/login"
-              className="px-5 py-2 rounded-full border border-white/10 text-powder font-mono text-xs uppercase tracking-wider hover:border-signal hover:text-signal transition-all"
-            >
-              Login
-            </a>
+        <a
+          href="/login"
+          className="px-5 py-2 rounded-full border border-white/10 text-powder font-mono text-xs uppercase tracking-wider hover:border-signal hover:text-signal transition-all"
+        >
+          Login
+        </a>
 
-            <a
-              href="/signup"
-              className="relative overflow-hidden group px-5 py-2 rounded-full bg-gear text-ice-950 font-mono text-xs font-bold uppercase tracking-wider hover:bg-white hover:scale-[1.03] active:scale-[0.97] transition-all duration-200"
-            >
-              <span className="animate-shine" />
-              <span className="relative z-10">Sign Up</span>
-            </a>
-          </>
-        )}
+        <a
+          href="/signup"
+          className="relative overflow-hidden group px-5 py-2 rounded-full bg-gear text-ice-950 font-mono text-xs font-bold uppercase tracking-wider hover:bg-white hover:scale-[1.03] active:scale-[0.97] transition-all duration-200"
+        >
+          <span className="animate-shine" />
+          <span className="relative z-10">Sign Up</span>
+        </a>
       </div>
     </header>
   );
@@ -737,8 +702,8 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<LandingPage />} />
-        <Route path="/login" element={<Login initialView="login" />} />
-        <Route path="/signup" element={<Login initialView="signup" />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/dashboard" element={<Dashboard />} />
       </Routes>
     </BrowserRouter>
   );
