@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence, useMotionValue, animate } from 'framer-motion';
 import {
   Eye, EyeOff, Lock, Mail, User, ArrowRight, ArrowLeft, Shield, Hexagon,
@@ -240,6 +241,7 @@ const ResendTimer = ({ onResend }: { onResend: () => void }) => {
 /* ------------------------------------------------------------------ */
 
 const LoginForm = ({ onSwitchToSignup, onSwitchToForgot }: { onSwitchToSignup: () => void; onSwitchToForgot: () => void }) => {
+  const navigate = useNavigate();
   const [step, setStep] = useState<'credentials' | 'otp'>('credentials');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -310,7 +312,7 @@ const LoginForm = ({ onSwitchToSignup, onSwitchToForgot }: { onSwitchToSignup: (
         localStorage.setItem('token', data.token);
         localStorage.setItem('user', JSON.stringify(data.user));
         alert('Logged in successfully! Welcome ' + data.user.name);
-        window.location.href = "/dashboard";
+        navigate('/dashboard');
       }
     } catch (err) {
       setError('Network error. Failed to verify OTP.');

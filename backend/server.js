@@ -11,7 +11,7 @@ const { generateOTP } = require("./src/utils/otpGenerator");
 const otpCache = require("./src/cache/otpCache");
 const { sendOTPEmail } = require("./src/services/emailService");
 const { checkRateLimit } = require("./src/middleware/rateLimiter");
-const jwt = require("jsonwebtoken");
+
 
 function loadEnvFile(envPath) {
   if (!fs.existsSync(envPath)) return;
@@ -39,7 +39,7 @@ const openAiApiKey = process.env.OPENAI_API_KEY || "";
 const aiApiKey = geminiApiKey || openAiApiKey || "";
 const openAiModel = process.env.OPENAI_MODEL || "gemini-2.0-flash";
 const geminiModels = [openAiModel, "gemini-2.5-flash", "gemini-2.0-flash-001"].filter((v,i,a) => a.indexOf(v) === i);
-const postgresUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL || "";
+const getPostgresUrl = () => process.env.DATABASE_URL || process.env.POSTGRES_URL || "";
 
 // ── In-memory result cache (keyed by file content hash) ───────────
 // Avoids burning Gemini quota re-analyzing the same drawing.
@@ -86,9 +86,10 @@ let dbError = null;
 let dbConfigInfo = { host: null, database: null, port: null };
 
 function getPool() {
-  if (!postgresPool && PgPool && postgresUrl) {
+  const url = getPostgresUrl();
+  if (!postgresPool && PgPool && url) {
     postgresPool = new PgPool({
-      connectionString: postgresUrl,
+      connectionString: url,
       max: 20,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 10000,
@@ -109,7 +110,8 @@ async function testConnection() {
 }
 
 async function connectDatabase(attempt = 1) {
-  if (!postgresUrl) {
+  const url = getPostgresUrl();
+  if (!url) {
     console.log("❌ DATABASE_URL not configured.");
     return false;
   }
