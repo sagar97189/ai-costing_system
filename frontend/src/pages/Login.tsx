@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { motion, AnimatePresence, useMotionValue, useSpring, useTransform, animate } from 'framer-motion';
+import { motion, AnimatePresence, useMotionValue, animate } from 'framer-motion';
 import {
-  Eye, Lock, Mail, User, ArrowRight, ArrowLeft, Shield, Hexagon,
+  Eye, EyeOff, Lock, Mail, User, ArrowRight, ArrowLeft, Shield, Hexagon,
   KeyRound, RefreshCcw, CheckCircle2, ShieldCheck, Loader2, Check,
 } from 'lucide-react';
 
@@ -11,7 +11,7 @@ import {
 /*  can be wired up and demoed before the API exists.                 */
 /* ------------------------------------------------------------------ */
 
-const mockSendOtp = (email: string) =>
+const mockSendOtp = (_email: string) =>
   new Promise<void>((resolve) => {
     setTimeout(resolve, 900);
   });
@@ -24,7 +24,7 @@ const mockVerifyOtp = (code: string) =>
     }, 900);
   });
 
-const mockSendResetEmail = (email: string) =>
+const mockSendResetEmail = (_email: string) =>
   new Promise<void>((resolve) => {
     setTimeout(resolve, 900);
   });
@@ -33,35 +33,49 @@ const mockSendResetEmail = (email: string) =>
 /*  Shared bits                                                       */
 /* ------------------------------------------------------------------ */
 
-const FormInput = ({ icon: Icon, type, placeholder, label, delay, value, onChange }: { icon: any, type: string, placeholder: string, label: string, delay: number, value?: string, onChange?: (v: string) => void }) => (
-  <motion.div
-    initial={{ opacity: 0, x: 20, filter: 'blur(10px)' }}
-    animate={{ opacity: 1, x: 0, filter: 'blur(0px)' }}
-    exit={{ opacity: 0, x: -20, filter: 'blur(10px)' }}
-    transition={{ duration: 0.5, delay, ease: [0.25, 0.46, 0.45, 0.94] }}
-    className="space-y-1.5 w-full"
-  >
-    <label className="text-[13px] text-slate-300 font-medium ml-1 tracking-wide">{label}</label>
-    <div className="relative group">
-      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-        <Icon className="h-4 w-4 text-slate-400 group-focus-within:text-blue-400 transition-colors duration-300" />
-      </div>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange?.(e.target.value)}
-        className="w-full bg-slate-900/40 border border-white/5 focus:border-blue-500/50 focus:bg-slate-900/80 focus:ring-1 focus:ring-blue-500/50 rounded-xl py-3 pl-10 pr-10 text-sm text-white placeholder-slate-500 transition-all duration-300 outline-none shadow-inner"
-        placeholder={placeholder}
-      />
-      {type === 'password' && (
-        <div className="absolute inset-y-0 right-0 pr-3.5 flex items-center cursor-pointer">
-          <Eye className="h-4 w-4 text-slate-400 hover:text-slate-200 transition-colors" />
+const FormInput = ({ icon: Icon, type, placeholder, label, delay, value, onChange }: { icon: any, type: string, placeholder: string, label: string, delay: number, value?: string, onChange?: (v: string) => void }) => {
+  const [showPassword, setShowPassword] = useState(false);
+  const isPassword = type === 'password';
+  const inputType = isPassword ? (showPassword ? 'text' : 'password') : type;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: 20, filter: 'blur(10px)' }}
+      animate={{ opacity: 1, x: 0, filter: 'blur(0px)' }}
+      exit={{ opacity: 0, x: -20, filter: 'blur(10px)' }}
+      transition={{ duration: 0.5, delay, ease: [0.25, 0.46, 0.45, 0.94] }}
+      className="space-y-1.5 w-full"
+    >
+      <label className="text-[13px] text-slate-300 font-medium ml-1 tracking-wide">{label}</label>
+      <div className="relative group">
+        <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+          <Icon className="h-4 w-4 text-slate-400 group-focus-within:text-blue-400 transition-colors duration-300" />
         </div>
-      )}
-      <div className="absolute inset-0 rounded-xl opacity-0 group-focus-within:opacity-100 ring-1 ring-blue-500/30 blur-[2px] transition-opacity duration-300 pointer-events-none" />
-    </div>
-  </motion.div>
-);
+        <input
+          type={inputType}
+          value={value}
+          onChange={(e) => onChange?.(e.target.value)}
+          className="w-full bg-slate-900/40 border border-white/5 focus:border-blue-500/50 focus:bg-slate-900/80 focus:ring-1 focus:ring-blue-500/50 rounded-xl py-3 pl-10 pr-10 text-sm text-white placeholder-slate-500 transition-all duration-300 outline-none shadow-inner"
+          placeholder={placeholder}
+        />
+        {isPassword && (
+          <button
+            type="button"
+            onClick={() => setShowPassword(!showPassword)}
+            className="absolute inset-y-0 right-0 pr-3.5 flex items-center cursor-pointer text-slate-400 hover:text-slate-200 transition-colors z-10"
+          >
+            {showPassword ? (
+              <EyeOff className="h-4 w-4" />
+            ) : (
+              <Eye className="h-4 w-4" />
+            )}
+          </button>
+        )}
+        <div className="absolute inset-0 rounded-xl opacity-0 group-focus-within:opacity-100 ring-1 ring-blue-500/30 blur-[2px] transition-opacity duration-300 pointer-events-none" />
+      </div>
+    </motion.div>
+  );
+};
 
 /** Six-box OTP entry. Auto-advances focus, supports backspace and paste. */
 const OtpInput = ({ value, onChange, length = 6 }: { value: string; onChange: (v: string) => void; length?: number }) => {
@@ -722,11 +736,7 @@ export default function AuthSwitcher() {
   const [view, setView] = useState<View>('login');
   const isLogin = view !== 'signup';
 
-  const mouseX = useMotionValue(0);
-  const mouseY = useMotionValue(0);
-
-  const rotateX = useSpring(useTransform(mouseY, [-1, 1], [5, -5]), { stiffness: 150, damping: 20 });
-  const rotateY = useSpring(useTransform(mouseX, [-1, 1], [-5, 5]), { stiffness: 150, damping: 20 });
+// unused animation values removed to satisfy strict tsconfig
 
   const copy = panelCopy[view];
 
