@@ -11,6 +11,25 @@ const { generateOTP } = require("./src/utils/otpGenerator");
 const otpCache = require("./src/cache/otpCache");
 const { sendOTPEmail } = require("./src/services/emailService");
 const { checkRateLimit } = require("./src/middleware/rateLimiter");
+const trustedDeviceCache = require("./src/cache/trustedDeviceCache");
+
+function parseCookies(req) {
+  const list = {};
+  const rc = req.headers.cookie;
+
+  if (rc) {
+    rc.split(';').forEach((cookie) => {
+      const parts = cookie.split('=');
+      const name = parts.shift().trim();
+      const val = decodeURIComponent(parts.join('='));
+      if (name) {
+        list[name] = val;
+      }
+    });
+  }
+
+  return list;
+}
 
 
 function loadEnvFile(envPath) {
@@ -172,12 +191,15 @@ function getPostgresPool() {
   return getPool();
 }
 
-function sendJson(res, statusCode, data) {
+function sendJson(res, statusCode, data, extraHeaders = {}) {
+  const origin = (res.req && res.req.headers && res.req.headers.origin) || "*";
   res.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
-    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Credentials": "true",
     "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, Cookie",
+    ...extraHeaders
   });
   res.end(JSON.stringify(data, null, 2));
 }
@@ -1070,19 +1092,22 @@ function compareDocuments(documents) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${port}`);
 
+  const origin = req.headers.origin || "*";
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
-      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Origin": origin,
+      "Access-Control-Allow-Credentials": "true",
       "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, Cookie",
     });
     res.end();
     return;
   }
 
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Cookie");
 
   if (["/health","/api/health","/v1/health"].includes(url.pathname)) {
     let dbStatus = {};
@@ -1180,6 +1205,29 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { error: "Invalid email or password." });
       }
 
+      // Check for trusted-device cookie
+      const cookies = parseCookies(req);
+      const trustedDeviceToken = cookies.trusted_device;
+
+      if (trustedDeviceToken) {
+        const deviceSession = trustedDeviceCache.getSession(trustedDeviceToken);
+        if (deviceSession && deviceSession.email.toLowerCase().trim() === email.toLowerCase().trim()) {
+          // Skip OTP! Generate JWT token immediately.
+          const token = jwt.sign(
+            { id: user.id, email, name: user.name },
+            process.env.JWT_SECRET || "super_secret_jwt_key",
+            { expiresIn: "24h" }
+          );
+
+          console.log(`🔒 [AUTH] OTP bypassed for trusted device: ${email}`);
+          return sendJson(res, 200, {
+            success: true,
+            token,
+            user: { id: user.id, name: user.name, email }
+          });
+        }
+      }
+
       // Generate secure 6-digit numeric OTP
       const otp = generateOTP();
 
@@ -1260,11 +1308,15 @@ const server = http.createServer(async (req, res) => {
         { expiresIn: "24h" }
       );
 
+      const { rawToken } = trustedDeviceCache.createSession(email, user.id);
+      const isProd = process.env.NODE_ENV === "production";
+      const cookie = `trusted_device=${rawToken}; Max-Age=86400; Path=/; HttpOnly; SameSite=Lax${isProd ? "; Secure" : ""}`;
+
       sendJson(res, 200, {
         success: true,
         token,
         user: { id: user.id, name: user.name, email }
-      });
+      }, { "Set-Cookie": cookie });
     } catch (err) {
       console.error("Verify OTP error:", err);
       sendJson(res, 500, { error: "Internal server error." });
@@ -1311,6 +1363,40 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 200, { success: true, message: "OTP resent" });
     } catch (err) {
       console.error("Resend OTP error:", err);
+      sendJson(res, 500, { error: "Internal server error." });
+    }
+    return;
+  }
+
+  // ── POST /api/auth/logout or /logout ───────────────────────────
+  if ((url.pathname === "/api/auth/logout" || url.pathname === "/logout") && req.method === "POST") {
+    try {
+      const cookies = parseCookies(req);
+      const trustedDeviceToken = cookies.trusted_device;
+
+      if (trustedDeviceToken) {
+        trustedDeviceCache.invalidateSession(trustedDeviceToken);
+      }
+
+      try {
+        const bodyBuf = await readBody(req);
+        if (bodyBuf.length) {
+          const body = JSON.parse(bodyBuf.toString("utf8"));
+          if (body.all && body.email) {
+            trustedDeviceCache.invalidateUserSessions(body.email);
+            console.log(`🔒 [AUTH] Logged out all trusted devices for: ${body.email}`);
+          }
+        }
+      } catch (bodyErr) {
+        // Body reading is optional/fails if empty
+      }
+
+      const isProd = process.env.NODE_ENV === "production";
+      const clearCookie = `trusted_device=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax${isProd ? "; Secure" : ""}`;
+
+      sendJson(res, 200, { success: true, message: "Logged out successfully." }, { "Set-Cookie": clearCookie });
+    } catch (err) {
+      console.error("Logout error:", err);
       sendJson(res, 500, { error: "Internal server error." });
     }
     return;
