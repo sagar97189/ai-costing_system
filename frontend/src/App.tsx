@@ -17,25 +17,44 @@ function Header() {
       </div>
 
       <nav className="hidden md:flex items-center gap-6 bg-ice-900/60 backdrop-blur-md px-6 py-2 rounded-full text-xs font-mono uppercase tracking-wider border border-white/5">
-        <a href="#home" className="hover:text-signal transition-colors">Home</a>
-        <a href="#products" className="hover:text-signal transition-colors">Products</a>
-        <a href="#contact" className="hover:text-signal transition-colors">Contact Us</a>
+        <a href="#home" className="relative overflow-hidden group block py-1">
+          <span className="block transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] group-hover:-translate-y-full">Home</span>
+          <span className="absolute inset-0 block transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] translate-y-full group-hover:translate-y-0 text-signal py-1">Home</span>
+        </a>
+        <a href="#products" className="relative overflow-hidden group block py-1">
+          <span className="block transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] group-hover:-translate-y-full">Products</span>
+          <span className="absolute inset-0 block transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] translate-y-full group-hover:translate-y-0 text-signal py-1">Products</span>
+        </a>
+        <a href="#contact" className="relative overflow-hidden group block py-1">
+          <span className="block transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] group-hover:-translate-y-full">Contact Us</span>
+          <span className="absolute inset-0 block transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] translate-y-full group-hover:translate-y-0 text-signal py-1">Contact Us</span>
+        </a>
       </nav>
 
       <div className="flex items-center gap-3">
         <a
           href="/login"
-          className="px-5 py-2 rounded-full border border-white/10 text-powder font-mono text-xs uppercase tracking-wider hover:border-signal hover:text-signal transition-all"
+          className="relative overflow-hidden rounded-full border border-white/10 text-powder font-mono text-xs uppercase tracking-wider hover:border-signal transition-all group block"
         >
-          Login
+          <span className="block px-5 py-2 transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] group-hover:-translate-y-full">
+            Login
+          </span>
+          <span className="absolute inset-0 flex items-center justify-center transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] translate-y-full group-hover:translate-y-0 text-signal">
+            Login
+          </span>
         </a>
 
         <a
           href="/signup"
-          className="relative overflow-hidden group px-5 py-2 rounded-full bg-gear text-ice-950 font-mono text-xs font-bold uppercase tracking-wider hover:bg-white hover:scale-[1.03] active:scale-[0.97] transition-all duration-200"
+          className="relative overflow-hidden group rounded-full bg-gear text-ice-950 font-mono text-xs font-bold uppercase tracking-wider hover:scale-[1.03] active:scale-[0.97] transition-all duration-200 block"
         >
           <span className="animate-shine" />
-          <span className="relative z-10">Sign Up</span>
+          <span className="block px-5 py-2 transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] group-hover:-translate-y-full relative z-10">
+            Sign Up
+          </span>
+          <span className="absolute inset-0 flex items-center justify-center transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] translate-y-full group-hover:translate-y-0 text-ice-950 font-bold z-10">
+            Sign Up
+          </span>
         </a>
       </div>
     </header>
@@ -70,9 +89,14 @@ function HeroSection() {
             Amanzi is an AI costing engine for extracting features, BOMs, and dimensions from engineering drawings with zero friction. Built for fast RFQ turnarounds.
           </p>
           <div className="mt-8 flex justify-center w-full">
-            <button className="relative overflow-hidden group px-5 py-2 md:px-6 md:py-2.5 text-xs md:text-sm uppercase font-mono tracking-wider border border-gear/30 bg-gear/10 text-gear rounded-full hover:bg-gear/20 hover:scale-[1.03] active:scale-[0.97] transition-all duration-200">
+            <button className="relative overflow-hidden group text-xs md:text-sm uppercase font-mono tracking-wider border border-gear/30 bg-gear/10 text-gear rounded-full hover:scale-[1.03] active:scale-[0.97] transition-all duration-200">
               <span className="animate-shine" />
-              <span className="relative z-10">Get Started</span>
+              <span className="block px-5 py-2 md:px-6 md:py-2.5 transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] group-hover:-translate-y-full relative z-10">
+                Get Started
+              </span>
+              <span className="absolute inset-0 flex items-center justify-center transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] translate-y-full group-hover:translate-y-0 text-gear z-10">
+                Get Started
+              </span>
             </button>
           </div>
         </div>
@@ -589,9 +613,15 @@ function CTASection() {
           </span>
         </h2>
 
-        <button className="mt-10 flex items-center justify-center gap-3 bg-gear text-ice-950 font-mono font-bold uppercase text-sm tracking-wider px-10 py-4 rounded-full hover:bg-white transition-all duration-300 hover:scale-105 hover:shadow-[0_0_40px_-10px_rgba(152,245,255,0.5)]">
-          <span>Get Started</span>
-          <ArrowRight className="w-5 h-5" />
+        <button className="mt-10 relative overflow-hidden group bg-gear text-ice-950 font-mono font-bold uppercase text-sm tracking-wider rounded-full hover:bg-white transition-all duration-300 hover:scale-105 hover:shadow-[0_0_40px_-10px_rgba(152,245,255,0.5)]">
+          <span className="flex items-center justify-center gap-3 px-10 py-4 transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] group-hover:-translate-y-full">
+            <span>Get Started</span>
+            <ArrowRight className="w-5 h-5" />
+          </span>
+          <span className="absolute inset-0 flex items-center justify-center gap-3 transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] translate-y-full group-hover:translate-y-0 text-ice-950 font-bold">
+            <span>Get Started</span>
+            <ArrowRight className="w-5 h-5" />
+          </span>
         </button>
       </div>
     </section>

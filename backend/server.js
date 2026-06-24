@@ -7,6 +7,11 @@ const jwt = require("jsonwebtoken");
 const { buildProfessionalPdf } = require("./pdf-generator");
 const { categorize } = require("./feature-categorizer");
 const { assignMachines, getAllMachines } = require("./machine-master");
+const { generateOTP } = require("./src/utils/otpGenerator");
+const otpCache = require("./src/cache/otpCache");
+const { sendOTPEmail } = require("./src/services/emailService");
+const { checkRateLimit } = require("./src/middleware/rateLimiter");
+const jwt = require("jsonwebtoken");
 
 function loadEnvFile(envPath) {
   if (!fs.existsSync(envPath)) return;
@@ -1139,14 +1144,23 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // ── POST /api/auth/login ───────────────────────────────────────
-  if (url.pathname === "/api/auth/login" && req.method === "POST") {
+  // ── POST /api/auth/login or /login ──────────────────────────────
+  if ((url.pathname === "/api/auth/login" || url.pathname === "/login") && req.method === "POST") {
     try {
       const body = JSON.parse(await readBody(req));
       const { email, password } = body;
       if (!email || !password) {
         return sendJson(res, 400, { error: "Email and password are required." });
       }
+
+      // IP-based Rate limiting for login
+      const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+      const rateLimitKey = `login:${ip}`;
+      const rateLimit = checkRateLimit(rateLimitKey, 5, 60 * 1000); // 5 attempts per minute
+      if (rateLimit.limited) {
+        return sendJson(res, 429, { error: "Too many login attempts. Please try again later." });
+      }
+
       const pool = getPostgresPool();
       if (!pool) return sendJson(res, 500, { error: "Database not connected." });
 
@@ -1164,15 +1178,137 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { error: "Invalid email or password." });
       }
 
+      // Generate secure 6-digit numeric OTP
+      const otp = generateOTP();
+
+      // Store in temporary cache (valid for 5 mins, resets any previous OTP and expiry timer)
+      otpCache.setOTP(email, otp);
+
+      // Send OTP to user's registered email
+      try {
+        await sendOTPEmail(email, otp);
+      } catch (emailErr) {
+        console.error("⚠️ Failed to send OTP email via SMTP:", emailErr.message);
+        console.log(`🔑 [DEV MODE] OTP generated for login: ${otp}`);
+      }
+
+      sendJson(res, 200, { success: true, message: "OTP sent" });
+    } catch (err) {
+      console.error("Login error:", err);
+      sendJson(res, 500, { error: "Internal server error." });
+    }
+    return;
+  }
+
+  // ── POST /api/auth/verify-otp or /verify-otp ───────────────────
+  if ((url.pathname === "/api/auth/verify-otp" || url.pathname === "/verify-otp") && req.method === "POST") {
+    try {
+      const body = JSON.parse(await readBody(req));
+      const { email, otp } = body;
+      if (!email || !otp) {
+        return sendJson(res, 400, { error: "Email and OTP are required." });
+      }
+
+      // IP-based Rate limiting for verification
+      const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+      const rateLimitKey = `verify:${ip}`;
+      const rateLimit = checkRateLimit(rateLimitKey, 10, 60 * 1000); // 10 attempts per minute
+      if (rateLimit.limited) {
+        return sendJson(res, 429, { error: "Too many verification attempts. Please try again later." });
+      }
+
+      const cachedEntry = otpCache.getOTP(email);
+      if (!cachedEntry) {
+        return sendJson(res, 400, { error: "OTP has expired or does not exist. Please request a new code." });
+      }
+
+      // Max 3 incorrect attempts verification check
+      if (cachedEntry.attempts >= 3) {
+        otpCache.deleteOTP(email);
+        return sendJson(res, 400, { error: "Too many failed attempts. This OTP has been invalidated. Please request a new one." });
+      }
+
+      if (cachedEntry.otp !== String(otp).trim()) {
+        otpCache.incrementAttempts(email);
+        const remaining = 3 - (cachedEntry.attempts + 1);
+        if (remaining <= 0) {
+          otpCache.deleteOTP(email);
+          return sendJson(res, 400, { error: "Too many failed attempts. This OTP has been invalidated. Please request a new one." });
+        }
+        return sendJson(res, 400, { error: `Invalid OTP. You have ${remaining} attempts remaining.` });
+      }
+
+      // OTP is valid - delete immediately
+      otpCache.deleteOTP(email);
+
+      const pool = getPostgresPool();
+      if (!pool) return sendJson(res, 500, { error: "Database not connected." });
+
+      const dbRes = await pool.query("SELECT id, name FROM users WHERE email = $1", [email]);
+      if (dbRes.rows.length === 0) {
+        return sendJson(res, 404, { error: "User not found." });
+      }
+
+      const user = dbRes.rows[0];
+
+      // Generate JWT
       const token = jwt.sign(
-        { id: user.id, name: user.name, email },
+        { id: user.id, email, name: user.name },
         process.env.JWT_SECRET || "super_secret_jwt_key",
         { expiresIn: "24h" }
       );
 
-      sendJson(res, 200, { success: true, token, user: { id: user.id, name: user.name, email } });
+      sendJson(res, 200, {
+        success: true,
+        token,
+        user: { id: user.id, name: user.name, email }
+      });
     } catch (err) {
-      console.error("Login error:", err);
+      console.error("Verify OTP error:", err);
+      sendJson(res, 500, { error: "Internal server error." });
+    }
+    return;
+  }
+
+  // ── POST /api/auth/resend-otp or /resend-otp ───────────────────
+  if ((url.pathname === "/api/auth/resend-otp" || url.pathname === "/resend-otp") && req.method === "POST") {
+    try {
+      const body = JSON.parse(await readBody(req));
+      const { email } = body;
+      if (!email) {
+        return sendJson(res, 400, { error: "Email is required." });
+      }
+
+      // Email-based rate limit for resending (max 1 request per 30 seconds)
+      const rateLimitKey = `resend:${email.toLowerCase().trim()}`;
+      const rateLimit = checkRateLimit(rateLimitKey, 1, 30 * 1000);
+      if (rateLimit.limited) {
+        return sendJson(res, 429, { error: "Please wait 30 seconds before requesting another OTP." });
+      }
+
+      const pool = getPostgresPool();
+      if (!pool) return sendJson(res, 500, { error: "Database not connected." });
+
+      const dbRes = await pool.query("SELECT id FROM users WHERE email = $1", [email]);
+      if (dbRes.rows.length === 0) {
+        return sendJson(res, 404, { error: "User not found." });
+      }
+
+      // Invalidate previous OTP and generate new one
+      const otp = generateOTP();
+      otpCache.setOTP(email, otp);
+
+      // Send OTP to email
+      try {
+        await sendOTPEmail(email, otp);
+      } catch (emailErr) {
+        console.error("⚠️ Failed to resend OTP email via SMTP:", emailErr.message);
+        console.log(`🔑 [DEV MODE] OTP generated for resend: ${otp}`);
+      }
+
+      sendJson(res, 200, { success: true, message: "OTP resent" });
+    } catch (err) {
+      console.error("Resend OTP error:", err);
       sendJson(res, 500, { error: "Internal server error." });
     }
     return;

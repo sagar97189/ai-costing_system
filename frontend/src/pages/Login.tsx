@@ -11,18 +11,7 @@ import {
 /*  can be wired up and demoed before the API exists.                 */
 /* ------------------------------------------------------------------ */
 
-const mockSendOtp = (_email: string) =>
-  new Promise<void>((resolve) => {
-    setTimeout(resolve, 900);
-  });
 
-const mockVerifyOtp = (code: string) =>
-  new Promise<void>((resolve, reject) => {
-    setTimeout(() => {
-      if (code.length === 6) resolve();
-      else reject(new Error('Invalid code'));
-    }, 900);
-  });
 
 const mockSendResetEmail = (_email: string) =>
   new Promise<void>((resolve) => {
@@ -259,6 +248,21 @@ const LoginForm = ({ onSwitchToSignup, onSwitchToForgot }: { onSwitchToSignup: (
   const [otp, setOtp] = useState('');
   const [error, setError] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
+  const [countdown, setCountdown] = useState(300);
+
+  useEffect(() => {
+    if (step !== 'otp' || countdown <= 0) return;
+    const id = setInterval(() => {
+      setCountdown((prev) => prev - 1);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [step, countdown]);
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
 
   const handleCredentialsSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -274,10 +278,9 @@ const LoginForm = ({ onSwitchToSignup, onSwitchToForgot }: { onSwitchToSignup: (
       if (!res.ok) {
         setError(data.error || 'Login failed');
       } else {
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('user', JSON.stringify(data.user));
-        alert('Logged in successfully! Welcome ' + data.user.name);
-        window.location.href = "/dashboard";
+        setStep('otp');
+        setCountdown(300);
+        setOtp('');
       }
     } catch (err) {
       setError('Network error. Is the backend running?');
@@ -288,14 +291,52 @@ const LoginForm = ({ onSwitchToSignup, onSwitchToForgot }: { onSwitchToSignup: (
 
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (countdown <= 0) {
+      setError('OTP has expired. Please request a new code.');
+      return;
+    }
     setError('');
     setVerifying(true);
     try {
-      await mockVerifyOtp(otp);
-    } catch {
-      setError('That code didn\'t match. Try again.');
+      const res = await fetch('http://localhost:8000/api/auth/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, otp })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Verification failed');
+      } else {
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('user', JSON.stringify(data.user));
+        alert('Logged in successfully! Welcome ' + data.user.name);
+        window.location.href = "/dashboard";
+      }
+    } catch (err) {
+      setError('Network error. Failed to verify OTP.');
     } finally {
       setVerifying(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    setError('');
+    try {
+      const res = await fetch('http://localhost:8000/api/auth/resend-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Resend failed');
+      } else {
+        setCountdown(300);
+        setOtp('');
+        setError('');
+      }
+    } catch (err) {
+      setError('Network error. Failed to resend OTP.');
     }
   };
 
@@ -390,17 +431,23 @@ const LoginForm = ({ onSwitchToSignup, onSwitchToForgot }: { onSwitchToSignup: (
             onSubmit={handleVerifyOtp}
           >
             <OtpInput value={otp} onChange={setOtp} />
-            {error && <p className="text-[13px] text-red-400 ml-1">{error}</p>}
-
-            <div className="text-[13px] text-slate-400">
-              <ResendTimer onResend={() => mockSendOtp(email)} />
+            
+            <div className="flex justify-between items-center text-[13px] text-slate-400 px-1">
+              {countdown > 0 ? (
+                <span>Expires in: <span className="font-semibold text-blue-400">{formatTime(countdown)}</span></span>
+              ) : (
+                <span className="text-red-400 font-medium">Expired</span>
+              )}
+              <ResendTimer onResend={handleResendOtp} />
             </div>
+
+            {error && <p className="text-[13px] text-red-400 ml-1">{error}</p>}
 
             <motion.button
               layoutId="auth-submit-btn"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              disabled={otp.length < 6 || verifying}
+              whileHover={{ scale: countdown > 0 ? 1.02 : 1 }}
+              whileTap={{ scale: countdown > 0 ? 0.98 : 1 }}
+              disabled={otp.length < 6 || verifying || countdown <= 0}
               className="w-full relative group overflow-hidden bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white font-semibold text-[15px] py-3.5 rounded-xl transition-all shadow-[0_0_20px_rgba(37,99,235,0.3)] mt-2"
             >
               <span className="relative z-10 flex items-center justify-center gap-2">
