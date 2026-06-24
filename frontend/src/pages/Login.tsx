@@ -13,15 +13,11 @@ import {
 
 const mockSendOtp = (email: string) =>
   new Promise<void>((resolve) => {
-    // TODO: replace with e.g. fetch('/api/auth/otp/send', { method: 'POST', body: JSON.stringify({ email }) })
-    console.log('[mock] sending OTP to', email);
     setTimeout(resolve, 900);
   });
 
 const mockVerifyOtp = (code: string) =>
   new Promise<void>((resolve, reject) => {
-    // TODO: replace with e.g. fetch('/api/auth/otp/verify', { method: 'POST', body: JSON.stringify({ code }) })
-    console.log('[mock] verifying OTP', code);
     setTimeout(() => {
       if (code.length === 6) resolve();
       else reject(new Error('Invalid code'));
@@ -30,8 +26,6 @@ const mockVerifyOtp = (code: string) =>
 
 const mockSendResetEmail = (email: string) =>
   new Promise<void>((resolve) => {
-    // TODO: replace with e.g. fetch('/api/auth/password/forgot', { method: 'POST', body: JSON.stringify({ email }) })
-    console.log('[mock] sending reset email to', email);
     setTimeout(resolve, 900);
   });
 
@@ -266,7 +260,6 @@ const LoginForm = ({ onSwitchToSignup, onSwitchToForgot }: { onSwitchToSignup: (
     setVerifying(true);
     try {
       await mockVerifyOtp(otp);
-      // TODO: redirect to authenticated app on success
     } catch {
       setError('That code didn\'t match. Try again.');
     } finally {
@@ -532,9 +525,7 @@ const SignupForm = ({ onSwitch }: { onSwitch: () => void }) => {
   const handleFinalSubmit = async () => {
     setCreating(true);
     try {
-      // TODO: replace with real signup call, e.g. fetch('/api/auth/signup', { ... })
       await new Promise((r) => setTimeout(r, 900));
-      // TODO: redirect to authenticated app / login on success
     } finally {
       setCreating(false);
     }

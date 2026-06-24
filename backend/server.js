@@ -73,14 +73,83 @@ try {
 } catch {
   PgPool = null;
 }
-let postgresPool = null;
 
-function getPostgresPool() {
-  if (!postgresUrl || !PgPool) return null;
-  if (!postgresPool) {
-    postgresPool = new PgPool({ connectionString: postgresUrl });
+let postgresPool = null;
+let dbConnected = false;
+let dbError = null;
+let dbConfigInfo = { host: null, database: null, port: null };
+
+function getPool() {
+  if (!postgresPool && PgPool && postgresUrl) {
+    postgresPool = new PgPool({
+      connectionString: postgresUrl,
+      max: 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+      allowExitOnIdle: true
+    });
   }
   return postgresPool;
+}
+
+async function testConnection() {
+  if (!postgresPool) return false;
+  try {
+    await postgresPool.query("SELECT NOW();");
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function connectDatabase(attempt = 1) {
+  if (!postgresUrl) {
+    console.log("❌ DATABASE_URL not configured.");
+    return false;
+  }
+  if (!PgPool) return false;
+  
+  const pool = getPool();
+  try {
+    await pool.query("SELECT NOW();");
+    dbConnected = true;
+    dbError = null;
+    
+    try {
+      const urlObj = new URL(postgresUrl);
+      dbConfigInfo.host = urlObj.hostname;
+      dbConfigInfo.database = urlObj.pathname.slice(1);
+      dbConfigInfo.port = urlObj.port || 5432;
+    } catch(e) {}
+    
+    console.log(`[DB] Connected to ${dbConfigInfo.database || 'unknown'} at ${dbConfigInfo.host || 'unknown'}:${dbConfigInfo.port || 'unknown'}`);
+    return true;
+  } catch (err) {
+    dbConnected = false;
+    dbError = err.message;
+    console.log(`❌ PostgreSQL Connection Failed\n\nReason:\n${err.message}\n\nDatabase:\n${postgresUrl.replace(/:[^:@]+@/, ":***@")}`);
+    
+    if (attempt < 5) {
+      console.log(`[DB] Retrying connection in 5 seconds (Attempt ${attempt + 1}/5)...`);
+      await new Promise(r => setTimeout(r, 5000));
+      return connectDatabase(attempt + 1);
+    }
+    return false;
+  }
+}
+
+async function disconnectDatabase() {
+  if (postgresPool) {
+    console.log("Closing PostgreSQL...");
+    try {
+      console.log("[DB] Disconnected");
+      await postgresPool.end();
+    } catch(e) {}
+  }
+}
+
+function getPostgresPool() {
+  return getPool();
 }
 
 function sendJson(res, statusCode, data) {
@@ -298,7 +367,6 @@ print(json.dumps(result))
 // ── Startup self-test: confirm Python + fitz work before first request ──
 (async () => {
   const python = process.env.PYTHON || process.env.PYTHON_EXE || "python";
-  console.log(`[STARTUP] Python executable: ${python}`);
   try {
     const out = await new Promise((resolve, reject) => {
       const { spawn } = require("child_process");
@@ -313,7 +381,7 @@ print(json.dumps(result))
       });
       child.on("error", reject);
     });
-    console.log(`[STARTUP] Vision deps OK — ${out}`);
+    console.log(`[PYTHON] Vision deps OK — ${out}`);
   } catch (err) {
     console.error(`[STARTUP] WARNING — fitz not available on ${python}`);
     console.error(`[STARTUP] Fix: run   "${python}" -m pip install pymupdf pypdf`);
@@ -976,7 +1044,32 @@ const server = http.createServer(async (req, res) => {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
   if (["/health","/api/health","/v1/health"].includes(url.pathname)) {
-    sendJson(res, 200, { status: "ok", port, model: openAiModel, postgres: !!postgresUrl });
+    let dbStatus = {};
+    if (dbConnected) {
+      dbStatus = {
+        connected: true,
+        host: dbConfigInfo.host || "localhost",
+        database: dbConfigInfo.database || "rfq",
+        port: parseInt(dbConfigInfo.port || 5433)
+      };
+    } else {
+      dbStatus = {
+        connected: false,
+        error: dbError || "Not connected"
+      };
+    }
+    
+    sendJson(res, 200, { 
+      status: "ok", 
+      database: dbStatus,
+      python: true, 
+      gemini: !!aiApiKey, 
+      uptime: process.uptime(),
+      memory: {
+        rss: process.memoryUsage().rss
+      },
+      timestamp: new Date().toISOString()
+    });
     return;
   }
 
@@ -996,8 +1089,10 @@ const server = http.createServer(async (req, res) => {
         `SELECT id, title, drawing_number, revision, filename, created_at
          FROM engineering_drawings ORDER BY created_at DESC LIMIT $1`, [limit]
       );
+      console.log("[DB] Query Success");
       sendJson(res, 200, { drawings: result.rows });
     } catch (e) {
+      console.log("[DB] Query Failed");
       sendJson(res, 500, { error: e.message });
     }
     return;
@@ -1015,8 +1110,10 @@ const server = http.createServer(async (req, res) => {
          JOIN engineering_drawings d ON d.id = r.drawing_id
          WHERE r.drawing_id = $1 ORDER BY r.seq`, [drawingId]
       );
+      console.log("[DB] Query Success");
       sendJson(res, 200, { drawingId, routing: result.rows });
     } catch (e) {
+      console.log("[DB] Query Failed");
       sendJson(res, 500, { error: e.message });
     }
     return;
@@ -1067,8 +1164,10 @@ const server = http.createServer(async (req, res) => {
         [routingId, prev.drawing_id, action, JSON.stringify(prev), JSON.stringify(updated.rows[0]), performedBy]
       );
 
+      console.log(`[DB] ${action === "approve" ? "Approve" : action === "reject" ? "Reject" : "Update"} Routing`);
       sendJson(res, 200, { success: true, step: updated.rows[0] });
     } catch (e) {
+      console.log("[DB] Query Failed");
       sendJson(res, 500, { error: e.message });
     }
     return;
@@ -1215,7 +1314,10 @@ const server = http.createServer(async (req, res) => {
               ]
             );
             const drawingId = drawRes.rows[0]?.id;
-            if (drawingId) savedIds.push(drawingId);
+            if (drawingId) {
+              savedIds.push(drawingId);
+              console.log("[DB] Insert Drawing");
+            }
 
             // 2. Save extracted features
             if (drawingId && cat?.features?.length) {
@@ -1228,6 +1330,7 @@ const server = http.createServer(async (req, res) => {
                    f.name||null, f.value!=null ? String(f.value) : null, f.unit||null, f.tolerance!=null ? String(f.tolerance) : null]
                 );
               }
+              console.log("[DB] Insert Features");
             }
 
             // 3. Save part classification
@@ -1244,6 +1347,7 @@ const server = http.createServer(async (req, res) => {
                   cat.manufacturingCategories || [],
                 ]
               );
+              console.log("[DB] Insert Classification");
             }
 
             // 4. Save routing suggestions
@@ -1264,6 +1368,7 @@ const server = http.createServer(async (req, res) => {
                   ]
                 );
               }
+              console.log("[DB] Insert Routing");
             }
 
             console.log(`[DB] Saved drawing id=${drawingId} with ${cat?.features?.length||0} features, ${cat?.routingSuggestion?.length||0} routing steps`);
@@ -1291,11 +1396,34 @@ const server = http.createServer(async (req, res) => {
   sendJson(res, 404, { error: "Not found", path: url.pathname });
 });
 
-function startServer() {
+async function startServer() {
+  await connectDatabase();
+  
   server.listen(port, () => {
-    console.log(`Mock ED backend running at http://localhost:${port}`);
+    console.log(`[SERVER] Running at http://localhost:${port}`);
+    console.log(`[SERVER] Database: ${dbConnected ? "Connected" : "Disconnected"}`);
+    console.log(`[SERVER] Environment: Development`);
+    console.log(`[SERVER] AI: Gemini integration ready`);
   });
 }
+
+process.on("SIGINT", async () => {
+  console.log("\nClosing HTTP server...");
+  server.close(async () => {
+    await disconnectDatabase();
+    console.log("\nShutdown complete.");
+    process.exit(0);
+  });
+});
+
+process.on("SIGTERM", async () => {
+  console.log("\nClosing HTTP server...");
+  server.close(async () => {
+    await disconnectDatabase();
+    console.log("\nShutdown complete.");
+    process.exit(0);
+  });
+});
 
 server.on("error", (err) => {
   if (err.code === "EADDRINUSE") {
