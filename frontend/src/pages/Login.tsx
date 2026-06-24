@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform, animate } from 'framer-motion';
 import {
   Eye, Lock, Mail, User, ArrowRight, ArrowLeft, Shield, Hexagon,
-  KeyRound, RefreshCcw, CheckCircle2, ShieldCheck, Loader2,
+  KeyRound, RefreshCcw, CheckCircle2, ShieldCheck, Loader2, Check,
 } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
@@ -33,7 +33,7 @@ const mockSendResetEmail = (email: string) =>
 /*  Shared bits                                                       */
 /* ------------------------------------------------------------------ */
 
-const FormInput = ({ icon: Icon, type, placeholder, label, delay }: { icon: any, type: string, placeholder: string, label: string, delay: number }) => (
+const FormInput = ({ icon: Icon, type, placeholder, label, delay, value, onChange }: { icon: any, type: string, placeholder: string, label: string, delay: number, value?: string, onChange?: (v: string) => void }) => (
   <motion.div
     initial={{ opacity: 0, x: 20, filter: 'blur(10px)' }}
     animate={{ opacity: 1, x: 0, filter: 'blur(0px)' }}
@@ -48,6 +48,8 @@ const FormInput = ({ icon: Icon, type, placeholder, label, delay }: { icon: any,
       </div>
       <input
         type={type}
+        value={value}
+        onChange={(e) => onChange?.(e.target.value)}
         className="w-full bg-slate-900/40 border border-white/5 focus:border-blue-500/50 focus:bg-slate-900/80 focus:ring-1 focus:ring-blue-500/50 rounded-xl py-3 pl-10 pr-10 text-sm text-white placeholder-slate-500 transition-all duration-300 outline-none shadow-inner"
         placeholder={placeholder}
       />
@@ -237,18 +239,32 @@ const ResendTimer = ({ onResend }: { onResend: () => void }) => {
 const LoginForm = ({ onSwitchToSignup, onSwitchToForgot }: { onSwitchToSignup: () => void; onSwitchToForgot: () => void }) => {
   const [step, setStep] = useState<'credentials' | 'otp'>('credentials');
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [sending, setSending] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [otp, setOtp] = useState('');
   const [error, setError] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
 
   const handleCredentialsSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setSending(true);
     try {
-      await mockSendOtp(email || 'your email');
-      setStep('otp');
+      const res = await fetch('http://localhost:8000/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Login failed');
+      } else {
+        alert('Logged in successfully! Welcome ' + data.user.name);
+        window.location.href = "/";
+      }
+    } catch (err) {
+      setError('Network error. Is the backend running?');
     } finally {
       setSending(false);
     }
@@ -316,15 +332,16 @@ const LoginForm = ({ onSwitchToSignup, onSwitchToForgot }: { onSwitchToSignup: (
             className="space-y-4"
             onSubmit={handleCredentialsSubmit}
           >
-            <FormInput icon={Mail} type="email" placeholder="Enter your email" label="Email address" delay={0.05} />
-            <FormInput icon={Lock} type="password" placeholder="Enter your password" label="Password" delay={0.1} />
-            {/* Hidden controlled mirror so we can read the email value for the OTP screen.
-                Swap the FormInput above for a controlled input if you want this wired live. */}
-            <input type="hidden" value={email} onChange={() => { }} />
+            <FormInput icon={Mail} type="email" placeholder="Enter your email" label="Email address" delay={0.05} value={email} onChange={setEmail} />
+            <FormInput icon={Lock} type="password" placeholder="Enter your password" label="Password" delay={0.1} value={password} onChange={setPassword} />
+
+            {error && <p className="text-[13px] text-red-400 font-medium ml-1">{error}</p>}
 
             <div className="flex justify-between items-center pt-1 pb-2">
-              <label className="flex items-center gap-2 text-[13px] text-slate-400 cursor-pointer group">
-                <div className="relative w-4 h-4 rounded border border-white/10 bg-slate-900/50 group-hover:border-blue-500/50 transition-colors flex items-center justify-center" />
+              <label className="flex items-center gap-2 text-[13px] text-slate-400 cursor-pointer group" onClick={() => setRememberMe(!rememberMe)}>
+                <div className={`relative w-4 h-4 rounded border transition-colors flex items-center justify-center ${rememberMe ? 'bg-blue-500 border-blue-500' : 'border-white/10 bg-slate-900/50 group-hover:border-blue-500/50'}`}>
+                  {rememberMe && <Check className="w-3 h-3 text-white" />}
+                </div>
                 Remember me
               </label>
               <button
@@ -340,7 +357,7 @@ const LoginForm = ({ onSwitchToSignup, onSwitchToForgot }: { onSwitchToSignup: (
               layoutId="auth-submit-btn"
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              disabled={sending}
+              disabled={sending || !rememberMe || !email || !password}
               className="w-full relative group overflow-hidden bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white font-semibold text-[15px] py-3.5 rounded-xl transition-all shadow-[0_0_20px_rgba(37,99,235,0.3)] mt-2"
             >
               <span className="relative z-10 flex items-center justify-center gap-2">
@@ -510,9 +527,13 @@ const ForgotPasswordForm = ({ onSwitchToLogin }: { onSwitchToLogin: () => void }
 /* ------------------------------------------------------------------ */
 
 const SignupForm = ({ onSwitch }: { onSwitch: () => void }) => {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [step, setStep] = useState<'details' | 'captcha'>('details');
   const [captchaVerified, setCaptchaVerified] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [agreed, setAgreed] = useState(false);
 
   // Moving to the captcha step doesn't add height to the card — it
   // replaces the form fields rather than stacking below them, so the
@@ -525,7 +546,20 @@ const SignupForm = ({ onSwitch }: { onSwitch: () => void }) => {
   const handleFinalSubmit = async () => {
     setCreating(true);
     try {
-      await new Promise((r) => setTimeout(r, 900));
+      const res = await fetch('http://localhost:8000/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, password })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Signup failed');
+      } else {
+        alert('Account created successfully! Please log in.');
+        onSwitch();
+      }
+    } catch (err) {
+      alert('Network error. Is the backend running?');
     } finally {
       setCreating(false);
     }
@@ -581,9 +615,9 @@ const SignupForm = ({ onSwitch }: { onSwitch: () => void }) => {
             onSubmit={handleDetailsSubmit}
           >
             <div className="rounded-[1.35rem] border border-white/15 bg-white/10 backdrop-blur-xl px-5 py-5 space-y-3">
-              <FormInput icon={User} type="text" placeholder="John Doe" label="Full Name" delay={0.05} />
-              <FormInput icon={Mail} type="email" placeholder="Enter your email" label="Email address" delay={0.1} />
-              <FormInput icon={Lock} type="password" placeholder="Create a password" label="Password" delay={0.15} />
+              <FormInput icon={User} type="text" placeholder="John Doe" label="Full Name" delay={0.05} value={name} onChange={setName} />
+              <FormInput icon={Mail} type="email" placeholder="Enter your email" label="Email address" delay={0.1} value={email} onChange={setEmail} />
+              <FormInput icon={Lock} type="password" placeholder="Create a password" label="Password" delay={0.15} value={password} onChange={setPassword} />
 
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
@@ -592,14 +626,17 @@ const SignupForm = ({ onSwitch }: { onSwitch: () => void }) => {
                 transition={{ delay: 0.2 }}
                 className="flex items-center gap-2 pt-1"
               >
-                <label className="flex items-center gap-2 text-[12px] text-slate-400 cursor-pointer group">
-                  <div className="relative w-4 h-4 rounded border border-white/10 bg-slate-900/50 group-hover:border-white/30 transition-colors flex items-center justify-center" />
+                <label className="flex items-center gap-2 text-[12px] text-slate-400 cursor-pointer group" onClick={() => setAgreed(!agreed)}>
+                  <div className={`relative w-4 h-4 rounded border transition-colors flex items-center justify-center ${agreed ? 'bg-white border-white' : 'border-white/10 bg-slate-900/50 group-hover:border-white/30'}`}>
+                    {agreed && <Check className="w-3 h-3 text-[#030811]" />}
+                  </div>
                   I agree to the Terms & Conditions
                 </label>
               </motion.div>
             </div>
 
             <motion.button
+              disabled={!agreed || !name || !email || !password}
               layoutId="auth-submit-btn"
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
@@ -607,7 +644,7 @@ const SignupForm = ({ onSwitch }: { onSwitch: () => void }) => {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ delay: 0.25 }}
-              className="w-full relative group overflow-hidden bg-white text-[#030811] hover:bg-slate-200 font-bold text-[15px] py-3 rounded-xl transition-all shadow-[0_0_20px_rgba(255,255,255,0.2)]"
+              className="w-full relative group overflow-hidden bg-white text-[#030811] disabled:opacity-50 hover:bg-slate-200 disabled:hover:bg-white font-bold text-[15px] py-3 rounded-xl transition-all shadow-[0_0_20px_rgba(255,255,255,0.2)]"
             >
               <span className="relative z-10 flex items-center justify-center gap-2">
                 Sign up <ArrowRight className="w-4 h-4" />

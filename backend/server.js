@@ -111,7 +111,19 @@ async function connectDatabase(attempt = 1) {
   
   const pool = getPool();
   try {
-    await pool.query("SELECT NOW();");
+    await postgresPool.query("SELECT NOW();");
+    
+    // Ensure users table exists
+    await postgresPool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255),
+        email VARCHAR(255) UNIQUE,
+        password_hash VARCHAR(255),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     dbConnected = true;
     dbError = null;
     
@@ -1070,6 +1082,71 @@ const server = http.createServer(async (req, res) => {
       },
       timestamp: new Date().toISOString()
     });
+    return;
+  }
+
+  // ── POST /api/auth/signup ──────────────────────────────────────
+  if (url.pathname === "/api/auth/signup" && req.method === "POST") {
+    try {
+      const body = JSON.parse(await readBody(req));
+      const { name, email, password } = body;
+      if (!name || !email || !password) {
+        return sendJson(res, 400, { error: "Name, email, and password are required." });
+      }
+      const pool = getPostgresPool();
+      if (!pool) return sendJson(res, 500, { error: "Database not connected." });
+
+      const crypto = require("crypto");
+      const salt = crypto.randomBytes(16).toString("hex");
+      const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, "sha512").toString("hex");
+      const passwordHash = `${salt}:${hash}`;
+
+      await pool.query(
+        "INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3)",
+        [name, email, passwordHash]
+      );
+      sendJson(res, 201, { success: true, message: "User created successfully." });
+    } catch (err) {
+      if (err.code === "23505") { // unique_violation
+        sendJson(res, 400, { error: "Email already in use." });
+      } else {
+        console.error("Signup error:", err);
+        sendJson(res, 500, { error: "Internal server error." });
+      }
+    }
+    return;
+  }
+
+  // ── POST /api/auth/login ───────────────────────────────────────
+  if (url.pathname === "/api/auth/login" && req.method === "POST") {
+    try {
+      const body = JSON.parse(await readBody(req));
+      const { email, password } = body;
+      if (!email || !password) {
+        return sendJson(res, 400, { error: "Email and password are required." });
+      }
+      const pool = getPostgresPool();
+      if (!pool) return sendJson(res, 500, { error: "Database not connected." });
+
+      const dbRes = await pool.query("SELECT id, name, password_hash FROM users WHERE email = $1", [email]);
+      if (dbRes.rows.length === 0) {
+        return sendJson(res, 401, { error: "Invalid email or password." });
+      }
+
+      const user = dbRes.rows[0];
+      const crypto = require("crypto");
+      const [salt, hash] = user.password_hash.split(":");
+      const verifyHash = crypto.pbkdf2Sync(password, salt, 1000, 64, "sha512").toString("hex");
+
+      if (hash !== verifyHash) {
+        return sendJson(res, 401, { error: "Invalid email or password." });
+      }
+
+      sendJson(res, 200, { success: true, user: { id: user.id, name: user.name, email } });
+    } catch (err) {
+      console.error("Login error:", err);
+      sendJson(res, 500, { error: "Internal server error." });
+    }
     return;
   }
 
