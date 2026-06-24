@@ -3,6 +3,7 @@ const { Buffer } = require("buffer");
 const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
+const jwt = require("jsonwebtoken");
 const { buildProfessionalPdf } = require("./pdf-generator");
 const { categorize } = require("./feature-categorizer");
 const { assignMachines, getAllMachines } = require("./machine-master");
@@ -992,6 +993,27 @@ function formatTableLines(headers, rows, widths) {
   return [renderRow(headers),sep,...rows.map(renderRow)];
 }
 
+// Helper to authenticate JWT token from Authorization header.
+// Returns the decoded user payload if valid, otherwise sends 401 and returns null.
+function authenticateRequest(req, res) {
+  const authHeader = req.headers["authorization"];
+  const token = authHeader && authHeader.split(" ")[1];
+
+  if (!token) {
+    sendJson(res, 401, { error: "Access denied. Token missing." });
+    return null;
+  }
+
+  try {
+    const secret = process.env.JWT_SECRET || "super_secret_jwt_key";
+    const decoded = jwt.verify(token, secret);
+    return decoded;
+  } catch (err) {
+    sendJson(res, 401, { error: "Access denied. Invalid or expired token." });
+    return null;
+  }
+}
+
 function compareDocuments(documents) {
   if(!Array.isArray(documents)||documents.length<2) return null;
   const left=documents[0]; const right=documents[1];
@@ -1142,7 +1164,13 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { error: "Invalid email or password." });
       }
 
-      sendJson(res, 200, { success: true, user: { id: user.id, name: user.name, email } });
+      const token = jwt.sign(
+        { id: user.id, name: user.name, email },
+        process.env.JWT_SECRET || "super_secret_jwt_key",
+        { expiresIn: "24h" }
+      );
+
+      sendJson(res, 200, { success: true, token, user: { id: user.id, name: user.name, email } });
     } catch (err) {
       console.error("Login error:", err);
       sendJson(res, 500, { error: "Internal server error." });
@@ -1152,12 +1180,14 @@ const server = http.createServer(async (req, res) => {
 
   // ── GET /machines — return full machine master ─────────────────
   if (url.pathname === "/machines" && req.method === "GET") {
+    if (!authenticateRequest(req, res)) return;
     sendJson(res, 200, { machines: getAllMachines() });
     return;
   }
 
   // ── GET /drawings — list recent drawings from DB ───────────────
   if (url.pathname === "/drawings" && req.method === "GET") {
+    if (!authenticateRequest(req, res)) return;
     const pool = getPostgresPool();
     if (!pool) { sendJson(res, 503, { error: "Database not configured." }); return; }
     try {
@@ -1178,6 +1208,7 @@ const server = http.createServer(async (req, res) => {
   // ── GET /drawings/:id/routing — get routing for a drawing ──────
   const routingMatch = url.pathname.match(/^\/drawings\/(\d+)\/routing$/);
   if (routingMatch && req.method === "GET") {
+    if (!authenticateRequest(req, res)) return;
     const pool = getPostgresPool();
     if (!pool) { sendJson(res, 503, { error: "Database not configured." }); return; }
     try {
@@ -1199,6 +1230,7 @@ const server = http.createServer(async (req, res) => {
   // ── POST /routing/:id/approve|reject|modify ────────────────────
   const approvalMatch = url.pathname.match(/^\/routing\/(\d+)\/(approve|reject|modify)$/);
   if (approvalMatch && req.method === "POST") {
+    if (!authenticateRequest(req, res)) return;
     const pool = getPostgresPool();
     if (!pool) { sendJson(res, 503, { error: "Database not configured." }); return; }
     try {
@@ -1252,6 +1284,7 @@ const server = http.createServer(async (req, res) => {
 
   const isAnalyzeRoute = ["/analyze","/upload","/process","/api/analyze"].includes(url.pathname);
   if (isAnalyzeRoute && (req.method === "POST" || req.method === "PUT")) {
+    if (!authenticateRequest(req, res)) return;
     try {
       const bodyBuffer = await readBody(req);
       const contentType = req.headers["content-type"] || "";

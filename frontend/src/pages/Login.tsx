@@ -274,6 +274,8 @@ const LoginForm = ({ onSwitchToSignup, onSwitchToForgot }: { onSwitchToSignup: (
       if (!res.ok) {
         setError(data.error || 'Login failed');
       } else {
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('user', JSON.stringify(data.user));
         alert('Logged in successfully! Welcome ' + data.user.name);
         window.location.href = "/";
       }
@@ -732,8 +734,8 @@ const panelCopy: Record<View, { badge: string; title: string; body: string }> = 
   },
 };
 
-export default function AuthSwitcher() {
-  const [view, setView] = useState<View>('login');
+export default function AuthSwitcher({ initialView = 'login' }: { initialView?: View }) {
+  const [view, setView] = useState<View>(initialView);
   const isLogin = view !== 'signup';
 
 // unused animation values removed to satisfy strict tsconfig
