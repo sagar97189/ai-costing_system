@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useLayoutEffect } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { ArrowRight, CheckCircle2, XCircle, Cpu, Layers } from 'lucide-react';
 import Login from './pages/Login';
+import Dashboard from './pages/Dashboard';
 import { Footer } from './components/footer/Footer';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
@@ -702,6 +703,7 @@ function App() {
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/dashboard" element={<Dashboard />} />
       </Routes>
     </BrowserRouter>
   );

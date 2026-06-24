@@ -275,7 +275,7 @@ const LoginForm = ({ onSwitchToSignup, onSwitchToForgot }: { onSwitchToSignup: (
         setError(data.error || 'Login failed');
       } else {
         alert('Logged in successfully! Welcome ' + data.user.name);
-        window.location.href = "/";
+        window.location.href = "/dashboard";
       }
     } catch (err) {
       setError('Network error. Is the backend running?');
