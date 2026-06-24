@@ -11,7 +11,7 @@ const { generateOTP } = require("./src/utils/otpGenerator");
 const otpCache = require("./src/cache/otpCache");
 const { sendOTPEmail } = require("./src/services/emailService");
 const { checkRateLimit } = require("./src/middleware/rateLimiter");
-
+const { authenticateRequest: authMiddleware } = require("./middleware/authMiddleware");
 
 function loadEnvFile(envPath) {
   if (!fs.existsSync(envPath)) return;
@@ -1083,6 +1083,24 @@ const server = http.createServer(async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+  const protectedPrefixes = [
+    "/api/analyze",
+    "/api/drawings",
+    "/api/upload",
+    "/api/machines",
+    "/api/routing",
+    "/api/bom",
+    "/api/costing",
+    "/api/rfq"
+  ];
+  
+  const isProtected = protectedPrefixes.some(prefix => url.pathname.startsWith(prefix));
+  if (isProtected) {
+    let authOk = false;
+    authMiddleware(req, res, () => { authOk = true; });
+    if (!authOk) return; // Middleware halted the request
+  }
 
   if (["/health","/api/health","/v1/health"].includes(url.pathname)) {
     let dbStatus = {};
