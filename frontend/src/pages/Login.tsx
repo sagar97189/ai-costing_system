@@ -274,11 +274,18 @@ const LoginForm = ({ onSwitchToSignup, onSwitchToForgot }: { onSwitchToSignup: (
       const res = await fetch('http://localhost:8000/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ email, password })
       });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || 'Login failed');
+      } else if (data.token) {
+        // Trusted device: OTP skipped!
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('user', JSON.stringify(data.user));
+        alert('Logged in successfully! Welcome ' + data.user.name);
+        navigate('/dashboard');
       } else {
         setStep('otp');
         setCountdown(300);
@@ -303,6 +310,7 @@ const LoginForm = ({ onSwitchToSignup, onSwitchToForgot }: { onSwitchToSignup: (
       const res = await fetch('http://localhost:8000/api/auth/verify-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ email, otp })
       });
       const data = await res.json();
@@ -327,6 +335,7 @@ const LoginForm = ({ onSwitchToSignup, onSwitchToForgot }: { onSwitchToSignup: (
       const res = await fetch('http://localhost:8000/api/auth/resend-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ email })
       });
       const data = await res.json();
@@ -614,6 +623,7 @@ const SignupForm = ({ onSwitch }: { onSwitch: () => void }) => {
       const res = await fetch('http://localhost:8000/api/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ name, email, password })
       });
       const data = await res.json();
