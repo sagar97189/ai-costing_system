@@ -39,7 +39,14 @@ const openAiApiKey = process.env.OPENAI_API_KEY || "";
 const aiApiKey = geminiApiKey || openAiApiKey || "";
 const openAiModel = process.env.OPENAI_MODEL || "gemini-2.0-flash";
 const geminiModels = [openAiModel, "gemini-2.5-flash", "gemini-2.0-flash-001"].filter((v,i,a) => a.indexOf(v) === i);
-const getPostgresUrl = () => process.env.DATABASE_URL || process.env.POSTGRES_URL || "";
+const getPostgresUrl = () => {
+  if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
+  if (process.env.POSTGRES_URL) return process.env.POSTGRES_URL;
+  if (process.env.DB_USER && process.env.DB_PASSWORD && process.env.DB_HOST && process.env.DB_PORT && process.env.DB_NAME) {
+    return `postgres://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}`;
+  }
+  return "";
+};
 
 // ── In-memory result cache (keyed by file content hash) ───────────
 // Avoids burning Gemini quota re-analyzing the same drawing.
@@ -132,11 +139,14 @@ async function connectDatabase(attempt = 1) {
       )
     `);
 
+    // Ensure last_otp_verified column exists for the 24-hour bypass feature
+    await postgresPool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_otp_verified TIMESTAMP`);
+
     dbConnected = true;
     dbError = null;
     
     try {
-      const urlObj = new URL(postgresUrl);
+      const urlObj = new URL(url);
       dbConfigInfo.host = urlObj.hostname;
       dbConfigInfo.database = urlObj.pathname.slice(1);
       dbConfigInfo.port = urlObj.port || 5432;
@@ -147,7 +157,7 @@ async function connectDatabase(attempt = 1) {
   } catch (err) {
     dbConnected = false;
     dbError = err.message;
-    console.log(`❌ PostgreSQL Connection Failed\n\nReason:\n${err.message}\n\nDatabase:\n${postgresUrl.replace(/:[^:@]+@/, ":***@")}`);
+    console.log(`❌ PostgreSQL Connection Failed\n\nReason:\n${err.message}\n\nDatabase:\n${url.replace(/:[^:@]+@/, ":***@")}`);
     
     if (attempt < 5) {
       console.log(`[DB] Retrying connection in 5 seconds (Attempt ${attempt + 1}/5)...`);
@@ -173,12 +183,8 @@ function getPostgresPool() {
 }
 
 function sendJson(res, statusCode, data) {
-  res.writeHead(statusCode, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-  });
+  res.statusCode = statusCode;
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.end(JSON.stringify(data, null, 2));
 }
 
@@ -1070,19 +1076,22 @@ function compareDocuments(documents) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${port}`);
 
+  const origin = req.headers.origin || "http://localhost:5173";
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
-      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Origin": origin,
       "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Allow-Credentials": "true"
     });
     res.end();
     return;
   }
 
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
 
   const protectedPrefixes = [
     "/api/analyze",
@@ -1184,7 +1193,7 @@ const server = http.createServer(async (req, res) => {
       const pool = getPostgresPool();
       if (!pool) return sendJson(res, 500, { error: "Database not connected." });
 
-      const dbRes = await pool.query("SELECT id, name, password_hash FROM users WHERE email = $1", [email]);
+      const dbRes = await pool.query("SELECT id, name, password_hash, last_otp_verified FROM users WHERE email = $1", [email]);
       if (dbRes.rows.length === 0) {
         return sendJson(res, 401, { error: "Invalid email or password." });
       }
@@ -1196,6 +1205,24 @@ const server = http.createServer(async (req, res) => {
 
       if (hash !== verifyHash) {
         return sendJson(res, 401, { error: "Invalid email or password." });
+      }
+
+      // Check if user verified OTP within the last 24 hours
+      if (user.last_otp_verified) {
+        const lastVerifiedTime = new Date(user.last_otp_verified).getTime();
+        const hours24 = 24 * 60 * 60 * 1000;
+        if (Date.now() - lastVerifiedTime < hours24) {
+          const token = jwt.sign(
+            { id: user.id, email, name: user.name },
+            process.env.JWT_SECRET || "super_secret_jwt_key",
+            { expiresIn: "24h" }
+          );
+          return sendJson(res, 200, {
+            success: true,
+            token,
+            user: { id: user.id, name: user.name, email }
+          });
+        }
       }
 
       // Generate secure 6-digit numeric OTP
@@ -1215,7 +1242,7 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 200, { success: true, message: "OTP sent" });
     } catch (err) {
       console.error("Login error:", err);
-      sendJson(res, 500, { error: "Internal server error." });
+      sendJson(res, 500, { error: "Internal server error.", details: err.message, stack: err.stack });
     }
     return;
   }
@@ -1270,6 +1297,9 @@ const server = http.createServer(async (req, res) => {
       }
 
       const user = dbRes.rows[0];
+
+      // Record successful OTP verification
+      await pool.query("UPDATE users SET last_otp_verified = CURRENT_TIMESTAMP WHERE id = $1", [user.id]);
 
       // Generate JWT
       const token = jwt.sign(
