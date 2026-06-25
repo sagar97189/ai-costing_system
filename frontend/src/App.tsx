@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useLayoutEffect } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import { ArrowRight, CheckCircle2, XCircle, Cpu, Layers } from 'lucide-react';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -32,8 +32,8 @@ function Header() {
       </nav>
 
       <div className="flex items-center gap-3">
-        <a
-          href="/login"
+        <Link
+          to="/login"
           className="relative overflow-hidden rounded-full border border-white/10 text-powder font-mono text-xs uppercase tracking-wider hover:border-signal transition-all group block"
         >
           <span className="block px-5 py-2 transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] group-hover:-translate-y-full">
@@ -42,10 +42,10 @@ function Header() {
           <span className="absolute inset-0 flex items-center justify-center transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] translate-y-full group-hover:translate-y-0 text-signal">
             Login
           </span>
-        </a>
+        </Link>
 
-        <a
-          href="/signup"
+        <Link
+          to="/signup"
           className="relative overflow-hidden group rounded-full bg-gear text-ice-950 font-mono text-xs font-bold uppercase tracking-wider hover:scale-[1.03] active:scale-[0.97] transition-all duration-200 block"
         >
           <span className="animate-shine" />
@@ -55,7 +55,7 @@ function Header() {
           <span className="absolute inset-0 flex items-center justify-center transition-transform duration-300 ease-[cubic-bezier(0.25,1,0.5,1)] translate-y-full group-hover:translate-y-0 text-ice-950 font-bold z-10">
             Sign Up
           </span>
-        </a>
+        </Link>
       </div>
     </header>
   );
@@ -727,13 +727,34 @@ function LandingPage() {
   );
 }
 
+import DashboardLayout from './layouts/DashboardLayout';
+import Drawings from './pages/Drawings';
+import Routing from './pages/Routing';
+import RFQs from './pages/RFQs';
+import Analytics from './pages/Analytics';
+import Suppliers from './pages/Suppliers';
+import Quotes from './pages/Quotes';
+
 function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<Login />} />
-        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/signup" element={<Login initialView="signup" />} />
+        
+        {/* Protected Dashboard Routes */}
+        <Route path="/dashboard" element={<DashboardLayout />}>
+          <Route index element={<Dashboard />} />
+          <Route path="drawings" element={<Drawings />} />
+          <Route path="routing" element={<Routing />} />
+          <Route path="rfqs" element={<RFQs />} />
+          <Route path="quotes" element={<Quotes />} />
+          <Route path="suppliers" element={<Suppliers />} />
+          <Route path="analytics" element={<Analytics />} />
+          <Route path="settings" element={<div className="p-8 text-white">Settings</div>} />
+          <Route path="users" element={<div className="p-8 text-white">Users</div>} />
+        </Route>
       </Routes>
     </BrowserRouter>
   );

@@ -7,6 +7,17 @@ export default {
   theme: {
     extend: {
       colors: {
+        brand: {
+          bg: '#0A0A0F',
+          surface: '#111118',
+          elevated: '#1A1A24',
+          indigo: '#6366F1',
+          violet: '#8B5CF6',
+          success: '#10B981',
+          warning: '#F59E0B',
+          danger: '#EF4444',
+          info: '#3B82F6',
+        },
         ice: {
           950: '#06111f',
           900: '#0a1628',
@@ -19,6 +30,7 @@ export default {
         gear: '#d7ff63',
       },
       fontFamily: {
+        sans: ['Inter', 'sans-serif'],
         anton: ['Anton', 'sans-serif'],
         mono: ['"IBM Plex Mono"', 'monospace'],
         serif: ['"Instrument Serif"', 'serif'],

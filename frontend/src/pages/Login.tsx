@@ -488,17 +488,74 @@ const LoginForm = ({ onSwitchToSignup, onSwitchToForgot }: { onSwitchToSignup: (
 
 const ForgotPasswordForm = ({ onSwitchToLogin }: { onSwitchToLogin: () => void }) => {
   const [email, setEmail] = useState('');
-  const [sent, setSent] = useState(false);
-  const [sending, setSending] = useState(false);
+  const [otp, setOtp] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [step, setStep] = useState<'email' | 'otp' | 'success'>('email');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [countdown, setCountdown] = useState(300);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSending(true);
+  useEffect(() => {
+    if (step !== 'otp' || countdown <= 0) return;
+    const id = setInterval(() => {
+      setCountdown((prev) => prev - 1);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [step, countdown]);
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const handleRequestOtp = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setError('');
+    setLoading(true);
     try {
-      await mockSendResetEmail(email);
-      setSent(true);
+      const res = await fetch('http://localhost:8000/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Failed to request reset');
+      } else {
+        setStep('otp');
+        setCountdown(300);
+        setOtp('');
+      }
+    } catch (err) {
+      setError('Network error. Is the backend running?');
     } finally {
-      setSending(false);
+      setLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      const res = await fetch('http://localhost:8000/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email, otp, newPassword })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Failed to reset password');
+      } else {
+        setStep('success');
+      }
+    } catch (err) {
+      setError('Network error. Failed to reset password.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -526,69 +583,108 @@ const ForgotPasswordForm = ({ onSwitchToLogin }: { onSwitchToLogin: () => void }
           <ArrowLeft className="w-3.5 h-3.5" /> Back to sign in
         </button>
 
-        {!sent ? (
+        {step === 'email' && (
           <>
             <h2 className="text-[32px] font-bold text-white mb-2 tracking-tight leading-tight">Reset password</h2>
-            <p className="text-slate-400 text-sm">We'll email you a link to get back into your account</p>
+            <p className="text-slate-400 text-sm">We'll email you an OTP to reset your password</p>
           </>
-        ) : (
+        )}
+        {step === 'otp' && (
           <>
-            <h2 className="text-[32px] font-bold text-white mb-2 tracking-tight leading-tight">Link sent</h2>
-            <p className="text-slate-400 text-sm">Check <span className="text-slate-300">{email || 'your inbox'}</span> for a reset link</p>
+            <h2 className="text-[32px] font-bold text-white mb-2 tracking-tight leading-tight">Check your inbox</h2>
+            <p className="text-slate-400 text-sm">Enter the 6-digit code sent to <span className="text-slate-300">{email}</span></p>
+          </>
+        )}
+        {step === 'success' && (
+          <>
+            <h2 className="text-[32px] font-bold text-white mb-2 tracking-tight leading-tight">Password Reset</h2>
+            <p className="text-slate-400 text-sm">Your password has been changed successfully.</p>
           </>
         )}
       </motion.div>
 
       <AnimatePresence mode="wait">
-        {!sent ? (
+        {step === 'email' && (
           <motion.form
             key="request"
             initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
             transition={{ duration: 0.35 }}
             className="space-y-4"
-            onSubmit={handleSubmit}
+            onSubmit={handleRequestOtp}
           >
-            <div className="space-y-1.5 w-full">
-              <label className="text-[13px] text-slate-300 font-medium ml-1 tracking-wide">Email address</label>
-              <div className="relative group">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                  <Mail className="h-4 w-4 text-slate-400 group-focus-within:text-blue-400 transition-colors duration-300" />
-                </div>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-slate-900/40 border border-white/5 focus:border-blue-500/50 focus:bg-slate-900/80 focus:ring-1 focus:ring-blue-500/50 rounded-xl py-3 pl-10 pr-4 text-sm text-white placeholder-slate-500 transition-all duration-300 outline-none shadow-inner"
-                  placeholder="Enter your account email"
-                />
-              </div>
-            </div>
+            <FormInput icon={Mail} type="email" placeholder="Enter your account email" label="Email address" delay={0.05} value={email} onChange={setEmail} />
+
+            {error && <p className="text-[13px] text-red-400 ml-1">{error}</p>}
 
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              disabled={sending}
+              disabled={loading || !email}
               className="w-full relative group overflow-hidden bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white font-semibold text-[15px] py-3.5 rounded-xl transition-all shadow-[0_0_20px_rgba(37,99,235,0.3)] mt-2"
             >
               <span className="relative z-10 flex items-center justify-center gap-2">
-                {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Send reset link <KeyRound className="w-4 h-4" /></>}
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Send OTP <KeyRound className="w-4 h-4" /></>}
               </span>
             </motion.button>
           </motion.form>
-        ) : (
-          <motion.div
-            key="confirmation"
+        )}
+        {step === 'otp' && (
+          <motion.form
+            key="verify"
             initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
             transition={{ duration: 0.35 }}
-            className="space-y-4"
+            className="space-y-5"
+            onSubmit={handleResetPassword}
           >
-            <div className="flex items-center gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-[13px] text-emerald-300">
-              <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-              If an account exists for that email, a reset link is on its way.
+            <div className="space-y-4">
+              <OtpInput value={otp} onChange={setOtp} />
+              <FormInput icon={Lock} type="password" placeholder="Enter new password" label="New Password" delay={0.05} value={newPassword} onChange={setNewPassword} />
             </div>
-            <div className="text-[13px] text-slate-400 text-center">
-              Didn't get it? <ResendTimer onResend={() => mockSendResetEmail(email)} />
+
+            <div className="flex justify-between items-center text-[13px] text-slate-400 px-1">
+              {countdown > 0 ? (
+                <span>Expires in: <span className="font-semibold text-blue-400">{formatTime(countdown)}</span></span>
+              ) : (
+                <span className="text-red-400 font-medium">Expired</span>
+              )}
+              <ResendTimer onResend={() => handleRequestOtp()} />
             </div>
+
+            {error && <p className="text-[13px] text-red-400 ml-1">{error}</p>}
+
+            <motion.button
+              whileHover={{ scale: countdown > 0 ? 1.02 : 1 }}
+              whileTap={{ scale: countdown > 0 ? 0.98 : 1 }}
+              disabled={otp.length < 6 || loading || countdown <= 0 || newPassword.length < 6}
+              className="w-full relative group overflow-hidden bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white font-semibold text-[15px] py-3.5 rounded-xl transition-all shadow-[0_0_20px_rgba(37,99,235,0.3)] mt-2"
+            >
+              <span className="relative z-10 flex items-center justify-center gap-2">
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Reset Password <CheckCircle2 className="w-4 h-4" /></>}
+              </span>
+            </motion.button>
+          </motion.form>
+        )}
+        {step === 'success' && (
+          <motion.div
+            key="success"
+            initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
+            transition={{ duration: 0.35 }}
+            className="space-y-4 text-center"
+          >
+            <div className="flex justify-center mb-2">
+              <div className="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400">
+                <CheckCircle2 className="w-8 h-8" />
+              </div>
+            </div>
+            <p className="text-slate-300 text-sm pb-4">You can now sign in with your new password.</p>
+            <motion.button
+              onClick={onSwitchToLogin}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              className="w-full relative group overflow-hidden bg-white text-[#030811] font-bold text-[15px] py-3.5 rounded-xl transition-all shadow-[0_0_20px_rgba(255,255,255,0.2)]"
+            >
+              Go to sign in
+            </motion.button>
           </motion.div>
         )}
       </AnimatePresence>
