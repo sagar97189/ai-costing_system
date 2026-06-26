@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, ChevronDown, ChevronRight, FileText, CheckCircle2, AlertCircle, FileCheck2, Cpu } from 'lucide-react';
 import { Skeleton } from '../components/ui/Skeleton';
 import { EmptyState } from '../components/ui/EmptyState';
+import { UploadModal } from '../components/ui/UploadModal';
 
 // --- MOCK DATA ---
 
@@ -106,6 +107,7 @@ export default function Drawings() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => setLoading(false), 400);
@@ -138,7 +140,10 @@ export default function Drawings() {
               className="pl-9 pr-4 py-2 bg-brand-surface border border-white/10 rounded-md text-sm text-white focus:outline-none focus:border-brand-indigo focus:ring-1 focus:ring-brand-indigo w-full transition-all"
             />
           </div>
-          <button className="px-4 py-2 bg-gradient-to-r from-brand-indigo to-brand-violet rounded-md font-medium text-sm hover:scale-105 active:scale-95 transition-all shadow-[0_4px_14px_rgba(99,102,241,0.3)] whitespace-nowrap">
+          <button 
+            onClick={() => setIsUploadModalOpen(true)}
+            className="px-4 py-2 bg-gradient-to-r from-brand-indigo to-brand-violet rounded-md font-medium text-sm hover:scale-105 active:scale-95 transition-all shadow-[0_4px_14px_rgba(99,102,241,0.3)] whitespace-nowrap"
+          >
             Upload PDF
           </button>
         </div>
@@ -286,6 +291,16 @@ export default function Drawings() {
           </div>
         )}
       </div>
+
+      {/* Upload Modal */}
+      <UploadModal 
+        isOpen={isUploadModalOpen} 
+        onClose={() => setIsUploadModalOpen(false)}
+        onUpload={(file) => {
+          console.log('Uploading file:', file);
+          // TODO: Implement actual file upload to API
+        }}
+      />
     </div>
   );
 }

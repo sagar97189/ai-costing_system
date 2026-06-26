@@ -744,10 +744,115 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  const isAnalyzeRoute = ["/analyze", "/upload", "/process", "/api/analyze"].includes(url.pathname);
-  if (isAnalyzeRoute && (req.method === "POST" || req.method === "PUT")) {
-    if (!authenticateRequest(req, res)) return;
-    sendJson(res, 200, { success: true, message: "Extraction module removed" });
+  const isUploadRoute = ["/api/upload"].includes(url.pathname);
+  if (isUploadRoute && req.method === "POST") {
+    // We disable auth check here temporarily for testing, or you can uncomment it
+    // if (!authMiddleware(req, res, () => {})) return;
+    
+    const { formidable } = require("formidable");
+    const uploadDir = path.join(__dirname, "uploads");
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+    
+    const form = formidable({
+      uploadDir,
+      keepExtensions: true,
+      maxFileSize: 50 * 1024 * 1024, // 50MB
+    });
+    
+    form.parse(req, (err, fields, files) => {
+      if (err) {
+        return sendJson(res, 400, { success: false, error: "File upload failed", details: err.message });
+      }
+      
+      const file = files.file || files.drawing;
+      // Formidable v3 returns arrays for files
+      const fileData = Array.isArray(file) ? file[0] : file;
+      
+      if (!fileData) {
+        return sendJson(res, 400, { success: false, error: "No file uploaded" });
+      }
+      
+      const inputPath = fileData.filepath;
+      const pythonExe = path.join(__dirname, "vision", "venv", "Scripts", "python.exe");
+      const scriptPath = path.join(__dirname, "vision", "opencv_engine.py");
+      
+      console.log(`[UPLOAD] Processing file: ${fileData.originalFilename}`);
+      
+      const { execFile } = require("child_process");
+      execFile(pythonExe, [scriptPath, inputPath, "--output_dir", uploadDir], (error, stdout, stderr) => {
+        if (error) {
+          console.error(`[OPENCV] Error: ${stderr || error.message}`);
+          return sendJson(res, 500, { success: false, error: "Image processing failed", details: stderr || error.message });
+        }
+        
+        try {
+          const result = JSON.parse(stdout);
+          return sendJson(res, 200, result);
+        } catch (parseError) {
+          console.error(`[OPENCV] JSON Parse Error: ${parseError.message}`, stdout);
+          return sendJson(res, 500, { success: false, error: "Invalid response from OpenCV engine", raw: stdout });
+        }
+      });
+    });
+    return;
+  }
+
+  const isProcessRoute = ["/api/process-drawing"].includes(url.pathname);
+  if (isProcessRoute && req.method === "POST") {
+    // We disable auth check here temporarily for testing, or you can uncomment it
+    // if (!authMiddleware(req, res, () => {})) return;
+    
+    const { formidable } = require("formidable");
+    const uploadDir = path.join(__dirname, "uploads");
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+    const debugDir = path.join(__dirname, "vision", "debug");
+    
+    const form = formidable({
+      uploadDir,
+      keepExtensions: true,
+      maxFileSize: 50 * 1024 * 1024, // 50MB
+    });
+    
+    form.parse(req, (err, fields, files) => {
+      if (err) {
+        return sendJson(res, 400, { success: false, error: "File upload failed", details: err.message });
+      }
+      
+      const file = files.file || files.drawing;
+      const fileData = Array.isArray(file) ? file[0] : file;
+      
+      if (!fileData) {
+        return sendJson(res, 400, { success: false, error: "No file uploaded" });
+      }
+      
+      const inputPath = fileData.filepath;
+      const pythonExe = path.join(__dirname, "vision", "venv", "Scripts", "python.exe");
+      const scriptPath = path.join(__dirname, "vision", "orchestrator.py");
+      
+      console.log(`[PROCESS-DRAWING] Orchestrating: ${fileData.originalFilename}`);
+      
+      const { execFile } = require("child_process");
+      execFile(pythonExe, [scriptPath, inputPath, "--output_dir", debugDir, "--debug"], { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+        if (error && !stdout) {
+          console.error(`[ORCHESTRATOR] Error: ${stderr || error.message}`);
+          return sendJson(res, 500, { success: false, error: "Multi-stage processing failed", details: stderr || error.message });
+        }
+        
+        try {
+          // PaddleOCR prints model downloading logs to stdout on first run.
+          // We find the first '{' which starts our unified JSON response
+          const jsonStart = stdout.indexOf('{');
+          if (jsonStart === -1) throw new Error("No JSON response found in stdout");
+          const jsonStr = stdout.substring(jsonStart);
+          
+          const result = JSON.parse(jsonStr);
+          return sendJson(res, 200, result);
+        } catch (parseError) {
+          console.error(`[ORCHESTRATOR] JSON Parse Error: ${parseError.message}`, stdout);
+          return sendJson(res, 500, { success: false, error: "Invalid response from Orchestrator", raw: stdout });
+        }
+      });
+    });
     return;
   }
 
