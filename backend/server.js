@@ -1,4 +1,16 @@
 const http = require("http");
+process.on('uncaughtException', (err) => {
+  if (["EOF", "ECONNRESET", "EPIPE"].includes(err.code)) {
+    console.warn('[SERVER] Client disconnected (uncaught):', err.code);
+    return;
+  }
+  console.error('UNCAUGHT', err);
+  process.exit(1);
+});
+process.on('unhandledRejection', (err) => {
+  console.error('UNHANDLED', err);
+  process.exit(1);
+});
 const { Buffer } = require("buffer");
 const fs = require("fs");
 const path = require("path");
@@ -38,8 +50,15 @@ const geminiApiKey = process.env.GEMINI_API_KEY || "";
 const openAiApiKey = process.env.OPENAI_API_KEY || "";
 const aiApiKey = geminiApiKey || openAiApiKey || "";
 const openAiModel = process.env.OPENAI_MODEL || "gemini-2.0-flash";
-const geminiModels = [openAiModel, "gemini-2.5-flash", "gemini-2.0-flash-001"].filter((v,i,a) => a.indexOf(v) === i);
-const getPostgresUrl = () => process.env.DATABASE_URL || process.env.POSTGRES_URL || "";
+const geminiModels = [openAiModel, "gemini-2.5-flash", "gemini-2.0-flash-001"].filter((v, i, a) => a.indexOf(v) === i);
+const getPostgresUrl = () => {
+  if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
+  if (process.env.POSTGRES_URL) return process.env.POSTGRES_URL;
+  if (process.env.DB_USER && process.env.DB_PASSWORD && process.env.DB_HOST && process.env.DB_PORT && process.env.DB_NAME) {
+    return `postgres://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}`;
+  }
+  return "";
+};
 
 // ── In-memory result cache (keyed by file content hash) ───────────
 // Avoids burning Gemini quota re-analyzing the same drawing.
@@ -69,10 +88,18 @@ function setCache(buffer, result) {
   const key = cacheKey(buffer);
   _analysisCache.set(key, { result: JSON.parse(JSON.stringify(result)), ts: Date.now() });
   if (_analysisCache.size > 50) {
-    const oldest = [..._analysisCache.entries()].sort((a,b) => a[1].ts - b[1].ts)[0];
+    const oldest = [..._analysisCache.entries()].sort((a, b) => a[1].ts - b[1].ts)[0];
     _analysisCache.delete(oldest[0]);
   }
 }
+
+// ── Converts confidence label to numeric score for DB storage ──
+function confidenceToScore(confidence) {
+  const map = { HIGH: 0.9, MEDIUM: 0.6, LOW: 0.3 };
+  if (typeof confidence === "number") return confidence;
+  return map[String(confidence).toUpperCase()] ?? 0.3;
+}
+
 let PgPool = null;
 try {
   ({ Pool: PgPool } = require("pg"));
@@ -95,6 +122,9 @@ function getPool() {
       connectionTimeoutMillis: 10000,
       allowExitOnIdle: true
     });
+    postgresPool.on('error', (err) => {
+      console.error('[DB] Unexpected error on idle client:', err.message);
+    });
   }
   return postgresPool;
 }
@@ -116,11 +146,11 @@ async function connectDatabase(attempt = 1) {
     return false;
   }
   if (!PgPool) return false;
-  
+
   const pool = getPool();
   try {
     await postgresPool.query("SELECT NOW();");
-    
+
     // Ensure users table exists
     await postgresPool.query(`
       CREATE TABLE IF NOT EXISTS users (
@@ -132,23 +162,26 @@ async function connectDatabase(attempt = 1) {
       )
     `);
 
+    // Ensure last_otp_verified column exists for the 24-hour bypass feature
+    await postgresPool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_otp_verified TIMESTAMP`);
+
     dbConnected = true;
     dbError = null;
-    
+
     try {
-      const urlObj = new URL(postgresUrl);
+      const urlObj = new URL(url);
       dbConfigInfo.host = urlObj.hostname;
       dbConfigInfo.database = urlObj.pathname.slice(1);
       dbConfigInfo.port = urlObj.port || 5432;
-    } catch(e) {}
-    
+    } catch (e) { }
+
     console.log(`[DB] Connected to ${dbConfigInfo.database || 'unknown'} at ${dbConfigInfo.host || 'unknown'}:${dbConfigInfo.port || 'unknown'}`);
     return true;
   } catch (err) {
     dbConnected = false;
     dbError = err.message;
-    console.log(`❌ PostgreSQL Connection Failed\n\nReason:\n${err.message}\n\nDatabase:\n${postgresUrl.replace(/:[^:@]+@/, ":***@")}`);
-    
+    console.log(`❌ PostgreSQL Connection Failed\n\nReason:\n${err.message}\n\nDatabase:\n${url.replace(/:[^:@]+@/, ":***@")}`);
+
     if (attempt < 5) {
       console.log(`[DB] Retrying connection in 5 seconds (Attempt ${attempt + 1}/5)...`);
       await new Promise(r => setTimeout(r, 5000));
@@ -164,7 +197,7 @@ async function disconnectDatabase() {
     try {
       console.log("[DB] Disconnected");
       await postgresPool.end();
-    } catch(e) {}
+    } catch (e) { }
   }
 }
 
@@ -173,12 +206,8 @@ function getPostgresPool() {
 }
 
 function sendJson(res, statusCode, data) {
-  res.writeHead(statusCode, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-  });
+  res.statusCode = statusCode;
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.end(JSON.stringify(data, null, 2));
 }
 
@@ -236,6 +265,9 @@ print(json.dumps({
         }
       });
 
+      child.stdin.on("error", (err) => {
+        console.warn("[PYTHON] stdin error (broken pipe/EOF):", err.message);
+      });
       child.stdin.end(buffer);
     });
 
@@ -333,6 +365,9 @@ print(json.dumps(result))
         if (code === 0) resolve();
         else reject(new Error(Buffer.concat(stderrChunks).toString("utf8")));
       });
+      child.stdin.on("error", (err) => {
+        console.warn("[PYTHON] stdin error (broken pipe/EOF):", err.message);
+      });
       child.stdin.end(buffer);
     });
 
@@ -350,7 +385,7 @@ print(json.dumps(result))
       return { fullPage: null, crops: [], vectorText: "", isVector: false };
     }
 
-    console.log(`[PDF->VISION] Python OK — pages:${result.pageCount}, isVector:${result.isVector}, fullPage:${!!result.fullPage}, crops:${(result.crops||[]).length}, vectorText:${(result.vectorText||"").length} chars`);
+    console.log(`[PDF->VISION] Python OK — pages:${result.pageCount}, isVector:${result.isVector}, fullPage:${!!result.fullPage}, crops:${(result.crops || []).length}, vectorText:${(result.vectorText || "").length} chars`);
 
     // Build per-page entries (multi-page support)
     const pages = (result.pages || []).map(p => ({
@@ -575,8 +610,8 @@ function extractEngineeringSignals(text) {
   for (const candidate of splitCandidates) {
     const keyword = candidate.name === "Hole pattern" ? /hole|holes|circle|circular|Ø/i
       : candidate.name === "Threaded feature" ? /thread|m\d+/i
-      : candidate.name === "Title block" ? /title block|revision|scale|sheet/i
-      : /part|component|body|shaft|housing|assembly/i;
+        : candidate.name === "Title block" ? /title block|revision|scale|sheet/i
+          : /part|component|body|shaft|housing|assembly/i;
     if (keyword.test(source) || candidate.name === "Title block") {
       subparts.push({
         name: candidate.name,
@@ -656,348 +691,348 @@ async function analyzeWithOpenAi({
   extraPages,   // array of {pageIndex, fullPage, crops} for pages 1+
 }) {
   try {
-  if (!file) {
-    return null;
-  }
+    if (!file) {
+      return null;
+    }
 
-  const isImage = isImageMimeType(file.contentType);
-  const isPdf = file.contentType === "application/pdf" || isImage; // treat rendered PDF page as image
-  if (!isImage && file.contentType !== "application/pdf") {
-    return null;
-  }
-  // ── AI prompt ────────────────────────────────────────────────────
-  const userNotesEscaped = String(notes || "").replace(/"/g, '\\"');
-  const fileTypeNote = "File type: engineering drawing image (rendered from PDF at high resolution). Read every visible element directly from the image.";
+    const isImage = isImageMimeType(file.contentType);
+    const isPdf = file.contentType === "application/pdf" || isImage; // treat rendered PDF page as image
+    if (!isImage && file.contentType !== "application/pdf") {
+      return null;
+    }
+    // ── AI prompt ────────────────────────────────────────────────────
+    const userNotesEscaped = String(notes || "").replace(/"/g, '\\"');
+    const fileTypeNote = "File type: engineering drawing image (rendered from PDF at high resolution). Read every visible element directly from the image.";
 
-  const schemaExample = JSON.stringify({
-    standardED: {
-      standardEdId: "string",
-      title: "full assembly or part name as written on the drawing",
-      source: { route: "__ROUTE__", method: "__METHOD__", contentType: "__CT__", receivedBytes: 0, filename: "__FILE__" },
-      titleBlock: {
-        drawingNumber: "string or null", revision: "string or null",
-        projection: "1st angle | 3rd angle | null",
-        units: "mm | inch | mixed | unknown", sheet: "string or null",
-        customer: "string or null", materialStandard: "string or null",
-        generalTolerances: "e.g. ISO 2768-m or null", surfaceFinish: "default finish callout or null",
-        drawnBy: "string or null", checkedBy: "string or null", approvedBy: "string or null",
-        date: "string or null", scale: "string or null", totalWeight: "string or null"
-      },
-      assembly: {
-        description: "one sentence: what this assembly does",
-        material: "assembly-level material or null", finish: "assembly-level finish or null"
-      },
-      assembledProduct: {
-        description: "describe the fully assembled product — its shape, function, and how the parts fit together",
-        overallDimensions: [
-          { name: "Overall Height / Length", value: "101.95", unit: "mm", tolerance: "102.00", note: "total assembled height" },
-          { name: "Cross Span Width", value: "90.80", unit: "mm", tolerance: "90.95", note: "span across trunnions" },
-          { name: "Overall Depth", value: "56.85", unit: "mm", tolerance: "90.96", note: "assembled depth" }
-        ],
-        bore: "central bore or inner cavity diameter if applicable, else null",
-        hollowness: "describe any hollow sections, internal cavities, internal geometry of the assembled product, else null",
-        weight: "product total weight as stated on drawing, else null",
-        grease: "grease type, grade, colour if specified, else null",
-        unspecifiedTolerances: [
-          { range: "5-6 mm", tolerance: "±0.1" },
-          { range: "6-30 mm", tolerance: "±0.2" },
-          { range: "30-120 mm", tolerance: "±0.3" },
-          { range: "120-315 mm", tolerance: "±0.5" },
-          { range: ">315 mm", tolerance: "±0.8" }
-        ],
-        hardnessTable: [
-          { part: "Cross", surfaceHRC: "57-62", coreHRC: "30-40", caseDepthMm: "0.8-1.20" },
-          { part: "Cup", surfaceHRC: "54-60", coreHRC: null, caseDepthMm: "0.65-0.95" },
-          { part: "Roller", surfaceHRC: "58-64", coreHRC: null, caseDepthMm: null },
-          { part: "Circlip", surfaceHRC: "47-54", coreHRC: null, caseDepthMm: null }
-        ],
-        specificationOfSize: [
-          { name: "Roller Diameter", value: "Ø2.5 -0.008", unit: "mm" },
-          { name: "Roller Length", value: "19.80 ±0.05", unit: "mm" },
-          { name: "Seal ID (Green)", value: "Ø23.60 - Ø23.70", unit: "mm" },
-          { name: "Seal OD (White)", value: "Ø37.50 - Ø37.60", unit: "mm" },
-          { name: "Seal Thickness (Green)", value: "4.20 - 4.25", unit: "mm" },
-          { name: "Grease Nipple Thread Size", value: "M10X1", unit: null },
-          { name: "Circlip Thickness", value: "2.5 ±0.05", unit: "mm" },
-          { name: "Grease Grade", value: "MPG-2", unit: null },
-          { name: "Grease Colour", value: "Red", unit: null }
-        ]
-      },
-      partslist: [
-        { itemNo: "1", partNumber: null, description: "Cross", quantity: 1, material: "20MnCr5 / 16MnCr5", notes: "forged billet machined" },
-        { itemNo: "2", partNumber: null, description: "Bearing Bush", quantity: 4, material: "20Mn Cr5", notes: null },
-        { itemNo: "3", partNumber: null, description: "Roller", quantity: "33x4=132", material: "SAE 52100", notes: null },
-        { itemNo: "4", partNumber: null, description: "Oil Seal", quantity: 4, material: "NBR", notes: null },
-        { itemNo: "5", partNumber: null, description: "Grease Nipple", quantity: 1, material: "STEEL-M610240", notes: null },
-        { itemNo: "6", partNumber: null, description: "Circlip", quantity: 4, material: "EN42J", notes: null }
-      ],
-      subparts: [
-        {
-          name: "Cross",
-          itemNo: "1", quantity: 1,
-          material: "20MnCr5 / 16MnCr5", finish: "Self Finish",
-          description: "Central cross body with 4 trunnions — primary structural element",
-          dimensions: [
-            { name: "Trunnion Diameter", value: "Ø23.83", unit: "mm", tolerance: "±0.01", note: "controls bearing bush fit" },
-            { name: "Thread", value: "M10X1", unit: null, tolerance: null, note: "grease nipple thread" },
-            { name: "Cross Span", value: "101.95-102.00", unit: "mm", tolerance: null, note: "overall cross length" }
-          ],
-          geometricTolerances: [],
-          surfaceFinish: null,
-          manufacturingNotes: ["Surface HRC: 57-62", "Core HRC: 30-40", "Cross ECD: 0.8-1.20mm"]
+    const schemaExample = JSON.stringify({
+      standardED: {
+        standardEdId: "string",
+        title: "full assembly or part name as written on the drawing",
+        source: { route: "__ROUTE__", method: "__METHOD__", contentType: "__CT__", receivedBytes: 0, filename: "__FILE__" },
+        titleBlock: {
+          drawingNumber: "string or null", revision: "string or null",
+          projection: "1st angle | 3rd angle | null",
+          units: "mm | inch | mixed | unknown", sheet: "string or null",
+          customer: "string or null", materialStandard: "string or null",
+          generalTolerances: "e.g. ISO 2768-m or null", surfaceFinish: "default finish callout or null",
+          drawnBy: "string or null", checkedBy: "string or null", approvedBy: "string or null",
+          date: "string or null", scale: "string or null", totalWeight: "string or null"
         },
-        {
-          name: "REPEAT — add one object per BOM row",
-          itemNo: "2", quantity: 4,
-          material: "20Mn Cr5", finish: null,
-          description: "Bearing bush housing the needle rollers",
-          dimensions: [
-            { name: "Outer Diameter", value: "Ø38.045", unit: "mm", tolerance: "±0.01", note: "housing bore fit" },
-            { name: "Inner Diameter", value: "Ø28.87-Ø28.92", unit: "mm", tolerance: null, note: "roller running surface" }
+        assembly: {
+          description: "one sentence: what this assembly does",
+          material: "assembly-level material or null", finish: "assembly-level finish or null"
+        },
+        assembledProduct: {
+          description: "describe the fully assembled product — its shape, function, and how the parts fit together",
+          overallDimensions: [
+            { name: "Overall Height / Length", value: "101.95", unit: "mm", tolerance: "102.00", note: "total assembled height" },
+            { name: "Cross Span Width", value: "90.80", unit: "mm", tolerance: "90.95", note: "span across trunnions" },
+            { name: "Overall Depth", value: "56.85", unit: "mm", tolerance: "90.96", note: "assembled depth" }
           ],
-          geometricTolerances: [],
-          surfaceFinish: null,
-          manufacturingNotes: ["Surface HRC: 54-60", "Cup ECD: 0.65-0.95mm"]
-        }
-      ],
-      assemblyDimensions: [
-        { name: "Circlip Groove Diameter", value: "32.0", unit: "mm", tolerance: "±0.5", note: "circlip seating diameter" }
-      ],
-      generalNotes: ["IF IN DOUBT DO NOT SCALE THE DRAWING", "DIMENSIONS ARE IN MM", "TRACEABILITY DETAILS AS PER RAP STD"],
-      summary: "2-3 sentences: assembled product description, total parts count, key materials, critical dimensions"
-    }
-  }, null, 2);
-
-  const prompt = [
-    "You are an expert mechanical engineer reading an engineering assembly drawing.",
-    "Extract EVERY piece of information visible on this drawing. A machinist must be able to re-create the full assembly from your output alone.",
-    "User notes: \"" + userNotesEscaped + "\"",
-    fileTypeNote,
-    "",
-    "EXTRACTION RULES:",
-    "1. assembledProduct: Extract ALL overall/envelope dimensions of the FULLY ASSEMBLED product — height, width, depth, bore, span, hollow sections, weight, grease spec, unspecified tolerance table, hardness table, specification-of-size table.",
-    "2. partslist: Extract EVERY row from the BOM/parts list table — item no, part number, description, material, quantity, any notes.",
-    "3. subparts: ONE object per BOM row. For EACH part extract ALL visible dimensions — OD, ID, length, width, thickness, thread, groove diameter, groove width, chamfer, radius, PCD, hole diameter, hole count, bore, etc.",
-    "4. Standard parts (bearings, seals, circlips, bolts, washers): still extract their dimensions from the drawing — diameter, bore, width, thread, length.",
-    "5. SPECIFICATION OF SIZE table: put each row into assembledProduct.specificationOfSize.",
-    "6. HEAT TREATMENT / HARDNESS table: put each row into assembledProduct.hardnessTable AND also into the relevant subpart's manufacturingNotes.",
-    "7. UNSPECIFIED TOLERANCES table: put each row into assembledProduct.unspecifiedTolerances.",
-    "8. DIMENSION LINES: read value, unit (mm/inch/deg), tolerance.",
-    "9. LEADER LINES / CALLOUTS: full text e.g. M10X1, R5, 2x Dia8 DRILL.",
-    "10. SECTION VIEWS (A-A etc): extract dims, note the section.",
-    "11. TITLE BLOCK: drawing number, revision, units, sheet, drawn by, date, scale, total weight.",
-    "12. GREASE type, grade, colour if shown.",
-    "13. assemblyDimensions: dims that belong to the assembly level, not a single part.",
-    "14. generalNotes: every note/instruction visible on the drawing including surface finish callouts.",
-    "",
-    "OUTPUT RULES:",
-    "- Only output what is actually visible. Do not invent values.",
-    "- subparts count MUST equal BOM rows count.",
-    "- Return valid JSON only. No markdown fences. No extra keys.",
-    "",
-    "Return exactly this JSON shape with all fields populated from the drawing:",
-    schemaExample
-  ].join("\n");
-
-
-  // ── Build Gemini vision parts (two-step prompt + crops + vector text) ──
-  const geminiParts = [];
-
-  // STEP A: visual survey prompt (forces full visual pass before extraction)
-  const stepAPrompt = [
-    "You are an expert mechanical engineer reading an engineering drawing.",
-    "STEP A — VISUAL SURVEY (do this before any extraction):",
-    "Carefully examine the full-page image and ALL high-resolution crop images provided.",
-    "List in plain language every distinct visual region you can see on this drawing:",
-    "- Each orthographic/section view (name them: front view, section A-A, detail view, etc.)",
-    "- Each table (BOM, specification of size, hardness/heat treatment, tolerance, revision block)",
-    "- Title block location and contents",
-    "- Notes block / general notes",
-    "- Any GD&T feature control frames (boxed symbols)",
-    "- Any surface finish symbols (checkmark/tick style with Ra value)",
-    "- Any thread/fit callouts (e.g. M10x1.5-6H, H7/g6)",
-    "- Any symbols or callouts that are small or hard to read — describe them anyway",
-    "After your survey, proceed to STEP B extraction.",
-    "",
-    "STEP B — STRUCTURED EXTRACTION:",
-    "Using BOTH the full-page image AND the high-resolution crops as authoritative sources,",
-    "extract all information. The crops show fine detail — use them for small text, symbols, and tables.",
-    "",
-    "SPECIFICALLY HUNT FOR (even if no obvious section contains them):",
-    "- Feature control frames: boxed GD&T symbol + tolerance value + datum letters (e.g. flatness ⊡0.05 A)",
-    "- Surface finish symbols: checkmark-style tick marks with Ra/Rz values (e.g. Ra 1.6, Ra 3.2)",
-    "- Thread/fit callouts: M[d]x[p]-[class] or H7/g6 style fits",
-    "- Note labels followed by a table or box — extract the adjacent value, not just the label",
-    "- Unspecified tolerance table (ranges like 0-10, 10-30, 30-100 with ± values)",
-    "- Heat treatment / hardness table (HRC values per part)",
-    "- Specification of size table",
-    "If any symbol is visually present but unclear, include it with confidence: 'partially visible'",
-    "",
-    "CONFIDENCE TAGGING — for each extracted dimension/value add a 'confidence' field:",
-    "  'clear'             — value is crisply readable",
-    "  'partially visible' — value is present but blurry/cut off (prefix value with ~)",
-    "  'inferred'          — value not directly readable, inferred from context",
-    "",
-    "User notes: \"" + userNotesEscaped + "\"",
-  ].join("\n");
-
-  // Full-page image (2x — spatial context)
-  geminiParts.push({ text: stepAPrompt });
-  geminiParts.push({ inline_data: { mime_type: file.contentType, data: file.data.toString("base64") } });
-
-  // High-res crops (4-6x — detail accuracy)
-  const cropsToSend = (crops || []).slice(0, 6); // cap at 6 crops to stay within token limits
-  for (const crop of cropsToSend) {
-    geminiParts.push({ text: `HIGH-RES CROP — ${crop.label} (use this as authoritative source for fine detail in this region):` });
-    geminiParts.push({ inline_data: { mime_type: crop.contentType, data: crop.data.toString("base64") } });
-  }
-
-  // Additional pages (multi-page PDFs) — send full-page image for each extra sheet
-  const extraPagesToSend = (extraPages || []).slice(0, 3); // cap at 3 extra pages
-  for (const pg of extraPagesToSend) {
-    if (pg.fullPage) {
-      geminiParts.push({ text: `ADDITIONAL SHEET — Page ${pg.pageIndex + 1} (extract all information from this sheet too):` });
-      geminiParts.push({ inline_data: { mime_type: pg.fullPage.contentType, data: pg.fullPage.data.toString("base64") } });
-      // Also send crops for additional pages
-      for (const crop of (pg.crops || []).slice(0, 3)) {
-        geminiParts.push({ text: `CROP from page ${pg.pageIndex + 1} — ${crop.label}:` });
-        geminiParts.push({ inline_data: { mime_type: crop.contentType, data: crop.data.toString("base64") } });
-      }
-    }
-  }
-
-  // Vector text cross-check (if available from vector PDF)
-  if (vectorText) {
-    geminiParts.push({ text: `VECTOR TEXT (ground-truth text extracted directly from PDF — use to cross-check your visual extraction, especially for numbers and labels):\n<<<\n${vectorText}\n>>>` });
-  } else if (extractedText) {
-    geminiParts.push({ text: `EXTRACTED PDF TEXT (use as supplementary reference):\n<<<\n${extractedText}\n>>>` });
-  }
-
-  // Final extraction schema instruction
-  geminiParts.push({ text: "Now return the complete extraction as valid JSON matching this exact schema:\n" + schemaExample });
-
-  // ── Try Gemini models in sequence ────────────────────────────────
-  if (aiApiKey) {
-    for (const geminiModel of geminiModels) {
-      try {
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${aiApiKey}`;
-        console.log(`[AI] Trying Gemini (${geminiModel}) with ${cropsToSend.length} crops...`);
-
-        // Try up to 2 times per model for 503
-        for (let attempt = 1; attempt <= 2; attempt++) {
-          const geminiRes = await fetch(geminiUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [{ role: "user", parts: geminiParts }],
-              generationConfig: { temperature: 0, responseMimeType: "application/json" },
-            }),
-          });
-
-          if (geminiRes.ok) {
-            const json = await geminiRes.json();
-            const content = json?.candidates?.[0]?.content?.parts?.[0]?.text;
-            const parsed = extractJsonObject(content);
-            if (parsed) {
-              console.log(`[AI] Gemini succeeded (${geminiModel}).`);
-              if (!parsed.ocrSummary) parsed.ocrSummary = "";
-              if (!Array.isArray(parsed.ocrHighlights)) parsed.ocrHighlights = [];
-              return parsed;
-            }
-            break;
-          } else {
-            const errText = await geminiRes.text();
-            if (geminiRes.status === 503 && attempt < 2) {
-              console.warn(`[AI] Gemini ${geminiModel} 503, retrying in 4s...`);
-              await new Promise(r => setTimeout(r, 4000));
-              continue;
-            }
-            if (geminiRes.status !== 429 && geminiRes.status !== 503 && geminiRes.status !== 404) {
-              throw new Error(`Gemini request failed (${geminiRes.status}): ${errText}`);
-            }
-            console.warn(`[AI] Gemini ${geminiModel} unavailable (${geminiRes.status}), trying next...`);
-            break;
-          }
-        }
-      } catch (err) {
-        if (!err.message.includes("429") && !err.message.includes("503") && !err.message.includes("quota")) throw err;
-        console.warn(`[AI] Gemini ${geminiModel} error:`, err.message);
-      }
-    }
-    console.warn("[AI] All Gemini models failed. Falling back to Ollama...");
-  }
-
-  // ── Fallback: Ollama llama3.2 (text only — llava needs too much RAM) ───
-  const ollamaHost = process.env.OLLAMA_HOST || "http://localhost:11434";
-  const ollamaModel = process.env.OLLAMA_TEXT_MODEL || "llama3.2";
-  console.log(`[AI] Using Ollama (${ollamaModel}) with extracted text...`);
-
-  const extractedBlock = extractedText || "No selectable text could be extracted.";
-  const userMessageContent = [
-    { type: "text", text: prompt + `\n\nPDF text:\n<<<\n${extractedBlock}\n>>>` }
-  ];
-
-  try {
-    const ollamaRes = await fetch(`${ollamaHost}/v1/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(120000), // 2 min — if llama3.2 takes longer it's stalled
-      body: JSON.stringify({
-        model: ollamaModel,
-        temperature: 0,
-        stream: false,
-        messages: [
-          { role: "system", content: "You are a precise engineering drawing extraction engine. Return valid JSON only." },
-          { role: "user", content: userMessageContent },
+          bore: "central bore or inner cavity diameter if applicable, else null",
+          hollowness: "describe any hollow sections, internal cavities, internal geometry of the assembled product, else null",
+          weight: "product total weight as stated on drawing, else null",
+          grease: "grease type, grade, colour if specified, else null",
+          unspecifiedTolerances: [
+            { range: "5-6 mm", tolerance: "±0.1" },
+            { range: "6-30 mm", tolerance: "±0.2" },
+            { range: "30-120 mm", tolerance: "±0.3" },
+            { range: "120-315 mm", tolerance: "±0.5" },
+            { range: ">315 mm", tolerance: "±0.8" }
+          ],
+          hardnessTable: [
+            { part: "Cross", surfaceHRC: "57-62", coreHRC: "30-40", caseDepthMm: "0.8-1.20" },
+            { part: "Cup", surfaceHRC: "54-60", coreHRC: null, caseDepthMm: "0.65-0.95" },
+            { part: "Roller", surfaceHRC: "58-64", coreHRC: null, caseDepthMm: null },
+            { part: "Circlip", surfaceHRC: "47-54", coreHRC: null, caseDepthMm: null }
+          ],
+          specificationOfSize: [
+            { name: "Roller Diameter", value: "Ø2.5 -0.008", unit: "mm" },
+            { name: "Roller Length", value: "19.80 ±0.05", unit: "mm" },
+            { name: "Seal ID (Green)", value: "Ø23.60 - Ø23.70", unit: "mm" },
+            { name: "Seal OD (White)", value: "Ø37.50 - Ø37.60", unit: "mm" },
+            { name: "Seal Thickness (Green)", value: "4.20 - 4.25", unit: "mm" },
+            { name: "Grease Nipple Thread Size", value: "M10X1", unit: null },
+            { name: "Circlip Thickness", value: "2.5 ±0.05", unit: "mm" },
+            { name: "Grease Grade", value: "MPG-2", unit: null },
+            { name: "Grease Colour", value: "Red", unit: null }
+          ]
+        },
+        partslist: [
+          { itemNo: "1", partNumber: null, description: "Cross", quantity: 1, material: "20MnCr5 / 16MnCr5", notes: "forged billet machined" },
+          { itemNo: "2", partNumber: null, description: "Bearing Bush", quantity: 4, material: "20Mn Cr5", notes: null },
+          { itemNo: "3", partNumber: null, description: "Roller", quantity: "33x4=132", material: "SAE 52100", notes: null },
+          { itemNo: "4", partNumber: null, description: "Oil Seal", quantity: 4, material: "NBR", notes: null },
+          { itemNo: "5", partNumber: null, description: "Grease Nipple", quantity: 1, material: "STEEL-M610240", notes: null },
+          { itemNo: "6", partNumber: null, description: "Circlip", quantity: 4, material: "EN42J", notes: null }
         ],
-      }),
-    });
+        subparts: [
+          {
+            name: "Cross",
+            itemNo: "1", quantity: 1,
+            material: "20MnCr5 / 16MnCr5", finish: "Self Finish",
+            description: "Central cross body with 4 trunnions — primary structural element",
+            dimensions: [
+              { name: "Trunnion Diameter", value: "Ø23.83", unit: "mm", tolerance: "±0.01", note: "controls bearing bush fit" },
+              { name: "Thread", value: "M10X1", unit: null, tolerance: null, note: "grease nipple thread" },
+              { name: "Cross Span", value: "101.95-102.00", unit: "mm", tolerance: null, note: "overall cross length" }
+            ],
+            geometricTolerances: [],
+            surfaceFinish: null,
+            manufacturingNotes: ["Surface HRC: 57-62", "Core HRC: 30-40", "Cross ECD: 0.8-1.20mm"]
+          },
+          {
+            name: "REPEAT — add one object per BOM row",
+            itemNo: "2", quantity: 4,
+            material: "20Mn Cr5", finish: null,
+            description: "Bearing bush housing the needle rollers",
+            dimensions: [
+              { name: "Outer Diameter", value: "Ø38.045", unit: "mm", tolerance: "±0.01", note: "housing bore fit" },
+              { name: "Inner Diameter", value: "Ø28.87-Ø28.92", unit: "mm", tolerance: null, note: "roller running surface" }
+            ],
+            geometricTolerances: [],
+            surfaceFinish: null,
+            manufacturingNotes: ["Surface HRC: 54-60", "Cup ECD: 0.65-0.95mm"]
+          }
+        ],
+        assemblyDimensions: [
+          { name: "Circlip Groove Diameter", value: "32.0", unit: "mm", tolerance: "±0.5", note: "circlip seating diameter" }
+        ],
+        generalNotes: ["IF IN DOUBT DO NOT SCALE THE DRAWING", "DIMENSIONS ARE IN MM", "TRACEABILITY DETAILS AS PER RAP STD"],
+        summary: "2-3 sentences: assembled product description, total parts count, key materials, critical dimensions"
+      }
+    }, null, 2);
 
-    if (!ollamaRes.ok) {
-      const errorText = await ollamaRes.text();
-      console.warn(`[AI] Ollama failed (${ollamaRes.status}): ${errorText.slice(0, 200)}`);
-      return null;
+    const prompt = [
+      "You are an expert mechanical engineer reading an engineering assembly drawing.",
+      "Extract EVERY piece of information visible on this drawing. A machinist must be able to re-create the full assembly from your output alone.",
+      "User notes: \"" + userNotesEscaped + "\"",
+      fileTypeNote,
+      "",
+      "EXTRACTION RULES:",
+      "1. assembledProduct: Extract ALL overall/envelope dimensions of the FULLY ASSEMBLED product — height, width, depth, bore, span, hollow sections, weight, grease spec, unspecified tolerance table, hardness table, specification-of-size table.",
+      "2. partslist: Extract EVERY row from the BOM/parts list table — item no, part number, description, material, quantity, any notes.",
+      "3. subparts: ONE object per BOM row. For EACH part extract ALL visible dimensions — OD, ID, length, width, thickness, thread, groove diameter, groove width, chamfer, radius, PCD, hole diameter, hole count, bore, etc.",
+      "4. Standard parts (bearings, seals, circlips, bolts, washers): still extract their dimensions from the drawing — diameter, bore, width, thread, length.",
+      "5. SPECIFICATION OF SIZE table: put each row into assembledProduct.specificationOfSize.",
+      "6. HEAT TREATMENT / HARDNESS table: put each row into assembledProduct.hardnessTable AND also into the relevant subpart's manufacturingNotes.",
+      "7. UNSPECIFIED TOLERANCES table: put each row into assembledProduct.unspecifiedTolerances.",
+      "8. DIMENSION LINES: read value, unit (mm/inch/deg), tolerance.",
+      "9. LEADER LINES / CALLOUTS: full text e.g. M10X1, R5, 2x Dia8 DRILL.",
+      "10. SECTION VIEWS (A-A etc): extract dims, note the section.",
+      "11. TITLE BLOCK: drawing number, revision, units, sheet, drawn by, date, scale, total weight.",
+      "12. GREASE type, grade, colour if shown.",
+      "13. assemblyDimensions: dims that belong to the assembly level, not a single part.",
+      "14. generalNotes: every note/instruction visible on the drawing including surface finish callouts.",
+      "",
+      "OUTPUT RULES:",
+      "- Only output what is actually visible. Do not invent values.",
+      "- subparts count MUST equal BOM rows count.",
+      "- Return valid JSON only. No markdown fences. No extra keys.",
+      "",
+      "Return exactly this JSON shape with all fields populated from the drawing:",
+      schemaExample
+    ].join("\n");
+
+
+    // ── Build Gemini vision parts (two-step prompt + crops + vector text) ──
+    const geminiParts = [];
+
+    // STEP A: visual survey prompt (forces full visual pass before extraction)
+    const stepAPrompt = [
+      "You are an expert mechanical engineer reading an engineering drawing.",
+      "STEP A — VISUAL SURVEY (do this before any extraction):",
+      "Carefully examine the full-page image and ALL high-resolution crop images provided.",
+      "List in plain language every distinct visual region you can see on this drawing:",
+      "- Each orthographic/section view (name them: front view, section A-A, detail view, etc.)",
+      "- Each table (BOM, specification of size, hardness/heat treatment, tolerance, revision block)",
+      "- Title block location and contents",
+      "- Notes block / general notes",
+      "- Any GD&T feature control frames (boxed symbols)",
+      "- Any surface finish symbols (checkmark/tick style with Ra value)",
+      "- Any thread/fit callouts (e.g. M10x1.5-6H, H7/g6)",
+      "- Any symbols or callouts that are small or hard to read — describe them anyway",
+      "After your survey, proceed to STEP B extraction.",
+      "",
+      "STEP B — STRUCTURED EXTRACTION:",
+      "Using BOTH the full-page image AND the high-resolution crops as authoritative sources,",
+      "extract all information. The crops show fine detail — use them for small text, symbols, and tables.",
+      "",
+      "SPECIFICALLY HUNT FOR (even if no obvious section contains them):",
+      "- Feature control frames: boxed GD&T symbol + tolerance value + datum letters (e.g. flatness ⊡0.05 A)",
+      "- Surface finish symbols: checkmark-style tick marks with Ra/Rz values (e.g. Ra 1.6, Ra 3.2)",
+      "- Thread/fit callouts: M[d]x[p]-[class] or H7/g6 style fits",
+      "- Note labels followed by a table or box — extract the adjacent value, not just the label",
+      "- Unspecified tolerance table (ranges like 0-10, 10-30, 30-100 with ± values)",
+      "- Heat treatment / hardness table (HRC values per part)",
+      "- Specification of size table",
+      "If any symbol is visually present but unclear, include it with confidence: 'partially visible'",
+      "",
+      "CONFIDENCE TAGGING — for each extracted dimension/value add a 'confidence' field:",
+      "  'clear'             — value is crisply readable",
+      "  'partially visible' — value is present but blurry/cut off (prefix value with ~)",
+      "  'inferred'          — value not directly readable, inferred from context",
+      "",
+      "User notes: \"" + userNotesEscaped + "\"",
+    ].join("\n");
+
+    // Full-page image (2x — spatial context)
+    geminiParts.push({ text: stepAPrompt });
+    geminiParts.push({ inline_data: { mime_type: file.contentType, data: file.data.toString("base64") } });
+
+    // High-res crops (4-6x — detail accuracy)
+    const cropsToSend = (crops || []).slice(0, 6); // cap at 6 crops to stay within token limits
+    for (const crop of cropsToSend) {
+      geminiParts.push({ text: `HIGH-RES CROP — ${crop.label} (use this as authoritative source for fine detail in this region):` });
+      geminiParts.push({ inline_data: { mime_type: crop.contentType, data: crop.data.toString("base64") } });
     }
 
-    const ollamaJson = await ollamaRes.json();
-    const ollamaContent = ollamaJson?.choices?.[0]?.message?.content;
-    const parsed = extractJsonObject(ollamaContent);
-    if (!parsed) {
-      console.warn("[AI] Ollama response did not contain valid JSON — using signal extraction fallback.");
-      return null;
+    // Additional pages (multi-page PDFs) — send full-page image for each extra sheet
+    const extraPagesToSend = (extraPages || []).slice(0, 3); // cap at 3 extra pages
+    for (const pg of extraPagesToSend) {
+      if (pg.fullPage) {
+        geminiParts.push({ text: `ADDITIONAL SHEET — Page ${pg.pageIndex + 1} (extract all information from this sheet too):` });
+        geminiParts.push({ inline_data: { mime_type: pg.fullPage.contentType, data: pg.fullPage.data.toString("base64") } });
+        // Also send crops for additional pages
+        for (const crop of (pg.crops || []).slice(0, 3)) {
+          geminiParts.push({ text: `CROP from page ${pg.pageIndex + 1} — ${crop.label}:` });
+          geminiParts.push({ inline_data: { mime_type: crop.contentType, data: crop.data.toString("base64") } });
+        }
+      }
     }
-    if (!parsed.ocrSummary) parsed.ocrSummary = "";
-    if (!Array.isArray(parsed.ocrHighlights)) parsed.ocrHighlights = [];
-    return parsed;
-  } catch (ollamaErr) {
-    const isTimeout = ollamaErr?.name === "TimeoutError" || ollamaErr?.name === "AbortError";
-    console.warn(`[AI] Ollama ${isTimeout ? "timed out" : "error"}: ${ollamaErr.message?.split("\n")[0]}`);
-    if (!isTimeout) console.warn("[AI] Is Ollama running? Start it with: ollama serve");
-    return null; // fall through to signal-extraction fallback in caller
-  }
+
+    // Vector text cross-check (if available from vector PDF)
+    if (vectorText) {
+      geminiParts.push({ text: `VECTOR TEXT (ground-truth text extracted directly from PDF — use to cross-check your visual extraction, especially for numbers and labels):\n<<<\n${vectorText}\n>>>` });
+    } else if (extractedText) {
+      geminiParts.push({ text: `EXTRACTED PDF TEXT (use as supplementary reference):\n<<<\n${extractedText}\n>>>` });
+    }
+
+    // Final extraction schema instruction
+    geminiParts.push({ text: "Now return the complete extraction as valid JSON matching this exact schema:\n" + schemaExample });
+
+    // ── Try Gemini models in sequence ────────────────────────────────
+    if (aiApiKey) {
+      for (const geminiModel of geminiModels) {
+        try {
+          const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${aiApiKey}`;
+          console.log(`[AI] Trying Gemini (${geminiModel}) with ${cropsToSend.length} crops...`);
+
+          // Try up to 2 times per model for 503
+          for (let attempt = 1; attempt <= 2; attempt++) {
+            const geminiRes = await fetch(geminiUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                contents: [{ role: "user", parts: geminiParts }],
+                generationConfig: { temperature: 0, responseMimeType: "application/json" },
+              }),
+            });
+
+            if (geminiRes.ok) {
+              const json = await geminiRes.json();
+              const content = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+              const parsed = extractJsonObject(content);
+              if (parsed) {
+                console.log(`[AI] Gemini succeeded (${geminiModel}).`);
+                if (!parsed.ocrSummary) parsed.ocrSummary = "";
+                if (!Array.isArray(parsed.ocrHighlights)) parsed.ocrHighlights = [];
+                return parsed;
+              }
+              break;
+            } else {
+              const errText = await geminiRes.text();
+              if (geminiRes.status === 503 && attempt < 2) {
+                console.warn(`[AI] Gemini ${geminiModel} 503, retrying in 4s...`);
+                await new Promise(r => setTimeout(r, 4000));
+                continue;
+              }
+              if (geminiRes.status !== 429 && geminiRes.status !== 503 && geminiRes.status !== 404) {
+                throw new Error(`Gemini request failed (${geminiRes.status}): ${errText}`);
+              }
+              console.warn(`[AI] Gemini ${geminiModel} unavailable (${geminiRes.status}), trying next...`);
+              break;
+            }
+          }
+        } catch (err) {
+          if (!err.message.includes("429") && !err.message.includes("503") && !err.message.includes("quota")) throw err;
+          console.warn(`[AI] Gemini ${geminiModel} error:`, err.message);
+        }
+      }
+      console.warn("[AI] All Gemini models failed. Falling back to Ollama...");
+    }
+
+    // ── Fallback: Ollama llama3.2 (text only — llava needs too much RAM) ───
+    const ollamaHost = process.env.OLLAMA_HOST || "http://localhost:11434";
+    const ollamaModel = process.env.OLLAMA_TEXT_MODEL || "llama3.2";
+    console.log(`[AI] Using Ollama (${ollamaModel}) with extracted text...`);
+
+    const extractedBlock = extractedText || "No selectable text could be extracted.";
+    const userMessageContent = [
+      { type: "text", text: prompt + `\n\nPDF text:\n<<<\n${extractedBlock}\n>>>` }
+    ];
+
+    try {
+      const ollamaRes = await fetch(`${ollamaHost}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(120000), // 2 min — if llama3.2 takes longer it's stalled
+        body: JSON.stringify({
+          model: ollamaModel,
+          temperature: 0,
+          stream: false,
+          messages: [
+            { role: "system", content: "You are a precise engineering drawing extraction engine. Return valid JSON only." },
+            { role: "user", content: userMessageContent },
+          ],
+        }),
+      });
+
+      if (!ollamaRes.ok) {
+        const errorText = await ollamaRes.text();
+        console.warn(`[AI] Ollama failed (${ollamaRes.status}): ${errorText.slice(0, 200)}`);
+        return null;
+      }
+
+      const ollamaJson = await ollamaRes.json();
+      const ollamaContent = ollamaJson?.choices?.[0]?.message?.content;
+      const parsed = extractJsonObject(ollamaContent);
+      if (!parsed) {
+        console.warn("[AI] Ollama response did not contain valid JSON — using signal extraction fallback.");
+        return null;
+      }
+      if (!parsed.ocrSummary) parsed.ocrSummary = "";
+      if (!Array.isArray(parsed.ocrHighlights)) parsed.ocrHighlights = [];
+      return parsed;
+    } catch (ollamaErr) {
+      const isTimeout = ollamaErr?.name === "TimeoutError" || ollamaErr?.name === "AbortError";
+      console.warn(`[AI] Ollama ${isTimeout ? "timed out" : "error"}: ${ollamaErr.message?.split("\n")[0]}`);
+      if (!isTimeout) console.warn("[AI] Is Ollama running? Start it with: ollama serve");
+      return null; // fall through to signal-extraction fallback in caller
+    }
   } catch (err) {
     console.warn("[AI] Analysis pipeline failed:", err?.message || err);
     return null;
   }
 }
 
-const routes = new Set(["/","/docs","/openapi.json","/health","/api/health","/v1/health","/analyze","/upload","/process","/api/analyze"]);
+const routes = new Set(["/", "/docs", "/openapi.json", "/health", "/api/health", "/v1/health", "/analyze", "/upload", "/process", "/api/analyze"]);
 
 function normalizeKey(value) {
-  return String(value||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 function truncateText(value, maxChars) {
-  const text = String(value||""); if(text.length<=maxChars) return text;
-  return text.slice(0,Math.max(0,maxChars-1)).trimEnd()+"...";
+  const text = String(value || ""); if (text.length <= maxChars) return text;
+  return text.slice(0, Math.max(0, maxChars - 1)).trimEnd() + "...";
 }
 function formatTableLines(headers, rows, widths) {
-  const actualWidths = headers.map((h,i)=>{
-    const rowMax=rows.reduce((m,r)=>Math.max(m,String(r[i]??"").length),0);
-    return widths?.[i]||Math.min(Math.max(h.length,rowMax,8),28);
+  const actualWidths = headers.map((h, i) => {
+    const rowMax = rows.reduce((m, r) => Math.max(m, String(r[i] ?? "").length), 0);
+    return widths?.[i] || Math.min(Math.max(h.length, rowMax, 8), 28);
   });
-  const renderRow=(cells)=>cells.map((c,i)=>truncateText(String(c??""),actualWidths[i]).padEnd(actualWidths[i]," ")).join(" | ");
-  const sep=actualWidths.map(w=>"-".repeat(w)).join("-+-");
-  return [renderRow(headers),sep,...rows.map(renderRow)];
+  const renderRow = (cells) => cells.map((c, i) => truncateText(String(c ?? ""), actualWidths[i]).padEnd(actualWidths[i], " ")).join(" | ");
+  const sep = actualWidths.map(w => "-".repeat(w)).join("-+-");
+  return [renderRow(headers), sep, ...rows.map(renderRow)];
 }
 
 // Helper to authenticate JWT token from Authorization header.
@@ -1022,67 +1057,70 @@ function authenticateRequest(req, res) {
 }
 
 function compareDocuments(documents) {
-  if(!Array.isArray(documents)||documents.length<2) return null;
-  const left=documents[0]; const right=documents[1];
-  const leftEd=left?.standardED||{}; const rightEd=right?.standardED||{};
-  const leftDims=Array.isArray(leftEd.dimensions)?leftEd.dimensions:[];
-  const rightDims=Array.isArray(rightEd.dimensions)?rightEd.dimensions:[];
-  const leftSubparts=Array.isArray(leftEd.subparts)?leftEd.subparts:[];
-  const rightSubparts=Array.isArray(rightEd.subparts)?rightEd.subparts:[];
-  const leftDimMap=new Map(leftDims.map(i=>[normalizeKey(i.name),i]));
-  const rightDimMap=new Map(rightDims.map(i=>[normalizeKey(i.name),i]));
-  const leftSubMap=new Map(leftSubparts.map(i=>[normalizeKey(i.name),i]));
-  const rightSubMap=new Map(rightSubparts.map(i=>[normalizeKey(i.name),i]));
-  const dimensionKeys=new Set([...leftDimMap.keys(),...rightDimMap.keys()]);
-  const subpartKeys=new Set([...leftSubMap.keys(),...rightSubMap.keys()]);
-  const dimensionRows=[]; const onlyLeftDimensions=[]; const onlyRightDimensions=[];
-  for(const key of dimensionKeys){
-    const l=leftDimMap.get(key); const r=rightDimMap.get(key);
-    const lv=l?`${l.value}${l.unit?` ${l.unit}`:""}${l.tolerance?` ${l.tolerance}`:""}`:`-`;
-    const rv=r?`${r.value}${r.unit?` ${r.unit}`:""}${r.tolerance?` ${r.tolerance}`:""}`:`-`;
-    const st=l&&r?(normalizeKey(l.value)===normalizeKey(r.value)?"shared":"different"):l?"only left":"only right";
-    dimensionRows.push([l?.name||r?.name||key,lv,rv,st]);
-    if(l&&!r) onlyLeftDimensions.push(l.name);
-    if(r&&!l) onlyRightDimensions.push(r.name);
+  if (!Array.isArray(documents) || documents.length < 2) return null;
+  const left = documents[0]; const right = documents[1];
+  const leftEd = left?.standardED || {}; const rightEd = right?.standardED || {};
+  const leftDims = Array.isArray(leftEd.dimensions) ? leftEd.dimensions : [];
+  const rightDims = Array.isArray(rightEd.dimensions) ? rightEd.dimensions : [];
+  const leftSubparts = Array.isArray(leftEd.subparts) ? leftEd.subparts : [];
+  const rightSubparts = Array.isArray(rightEd.subparts) ? rightEd.subparts : [];
+  const leftDimMap = new Map(leftDims.map(i => [normalizeKey(i.name), i]));
+  const rightDimMap = new Map(rightDims.map(i => [normalizeKey(i.name), i]));
+  const leftSubMap = new Map(leftSubparts.map(i => [normalizeKey(i.name), i]));
+  const rightSubMap = new Map(rightSubparts.map(i => [normalizeKey(i.name), i]));
+  const dimensionKeys = new Set([...leftDimMap.keys(), ...rightDimMap.keys()]);
+  const subpartKeys = new Set([...leftSubMap.keys(), ...rightSubMap.keys()]);
+  const dimensionRows = []; const onlyLeftDimensions = []; const onlyRightDimensions = [];
+  for (const key of dimensionKeys) {
+    const l = leftDimMap.get(key); const r = rightDimMap.get(key);
+    const lv = l ? `${l.value}${l.unit ? ` ${l.unit}` : ""}${l.tolerance ? ` ${l.tolerance}` : ""}` : `-`;
+    const rv = r ? `${r.value}${r.unit ? ` ${r.unit}` : ""}${r.tolerance ? ` ${r.tolerance}` : ""}` : `-`;
+    const st = l && r ? (normalizeKey(l.value) === normalizeKey(r.value) ? "shared" : "different") : l ? "only left" : "only right";
+    dimensionRows.push([l?.name || r?.name || key, lv, rv, st]);
+    if (l && !r) onlyLeftDimensions.push(l.name);
+    if (r && !l) onlyRightDimensions.push(r.name);
   }
-  const subpartRows=[]; const onlyLeftSubparts=[]; const onlyRightSubparts=[];
-  for(const key of subpartKeys){
-    const l=leftSubMap.get(key); const r=rightSubMap.get(key);
-    const st=l&&r?"shared":l?"only left":"only right";
-    subpartRows.push([l?.name||r?.name||key,l?`x${l.quantity||1}`:"-",r?`x${r.quantity||1}`:"-",st]);
-    if(l&&!r) onlyLeftSubparts.push(l.name);
-    if(r&&!l) onlyRightSubparts.push(r.name);
+  const subpartRows = []; const onlyLeftSubparts = []; const onlyRightSubparts = [];
+  for (const key of subpartKeys) {
+    const l = leftSubMap.get(key); const r = rightSubMap.get(key);
+    const st = l && r ? "shared" : l ? "only left" : "only right";
+    subpartRows.push([l?.name || r?.name || key, l ? `x${l.quantity || 1}` : "-", r ? `x${r.quantity || 1}` : "-", st]);
+    if (l && !r) onlyLeftSubparts.push(l.name);
+    if (r && !l) onlyRightSubparts.push(r.name);
   }
-  const sp=[];
-  if(onlyRightDimensions.length) sp.push(`Doc 2 adds ${onlyRightDimensions.join(", ")}`);
-  if(onlyLeftDimensions.length)  sp.push(`Doc 1 has extra ${onlyLeftDimensions.join(", ")}`);
-  if(onlyRightSubparts.length)   sp.push(`Doc 2 adds subparts ${onlyRightSubparts.join(", ")}`);
-  if(onlyLeftSubparts.length)    sp.push(`Doc 1 has subparts ${onlyLeftSubparts.join(", ")}`);
+  const sp = [];
+  if (onlyRightDimensions.length) sp.push(`Doc 2 adds ${onlyRightDimensions.join(", ")}`);
+  if (onlyLeftDimensions.length) sp.push(`Doc 1 has extra ${onlyLeftDimensions.join(", ")}`);
+  if (onlyRightSubparts.length) sp.push(`Doc 2 adds subparts ${onlyRightSubparts.join(", ")}`);
+  if (onlyLeftSubparts.length) sp.push(`Doc 1 has subparts ${onlyLeftSubparts.join(", ")}`);
   return {
-    documents:[{fileName:left.fileName,title:leftEd.title},{fileName:right.fileName,title:rightEd.title}],
-    summary:sp.length?sp.join(". "):"The two files share the same visible dimensions and subparts.",
-    dimensions:{headers:["Dimension","Doc 1","Doc 2","Status"],rows:dimensionRows},
-    subparts:{headers:["Subpart","Doc 1 Qty","Doc 2 Qty","Status"],rows:subpartRows},
-    uniqueToDoc2:{dimensions:onlyRightDimensions,subparts:onlyRightSubparts},
+    documents: [{ fileName: left.fileName, title: leftEd.title }, { fileName: right.fileName, title: rightEd.title }],
+    summary: sp.length ? sp.join(". ") : "The two files share the same visible dimensions and subparts.",
+    dimensions: { headers: ["Dimension", "Doc 1", "Doc 2", "Status"], rows: dimensionRows },
+    subparts: { headers: ["Subpart", "Doc 1 Qty", "Doc 2 Qty", "Status"], rows: subpartRows },
+    uniqueToDoc2: { dimensions: onlyRightDimensions, subparts: onlyRightSubparts },
   };
 }
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${port}`);
 
+  const origin = req.headers.origin || "http://localhost:5173";
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
-      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Origin": origin,
       "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Allow-Credentials": "true"
     });
     res.end();
     return;
   }
 
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
 
   const protectedPrefixes = [
     "/api/analyze",
@@ -1094,7 +1132,7 @@ const server = http.createServer(async (req, res) => {
     "/api/costing",
     "/api/rfq"
   ];
-  
+
   const isProtected = protectedPrefixes.some(prefix => url.pathname.startsWith(prefix));
   if (isProtected) {
     let authOk = false;
@@ -1102,7 +1140,7 @@ const server = http.createServer(async (req, res) => {
     if (!authOk) return; // Middleware halted the request
   }
 
-  if (["/health","/api/health","/v1/health"].includes(url.pathname)) {
+  if (["/health", "/api/health", "/v1/health"].includes(url.pathname)) {
     let dbStatus = {};
     if (dbConnected) {
       dbStatus = {
@@ -1117,12 +1155,12 @@ const server = http.createServer(async (req, res) => {
         error: dbError || "Not connected"
       };
     }
-    
-    sendJson(res, 200, { 
-      status: "ok", 
+
+    sendJson(res, 200, {
+      status: "ok",
       database: dbStatus,
-      python: true, 
-      gemini: !!aiApiKey, 
+      python: true,
+      gemini: !!aiApiKey,
       uptime: process.uptime(),
       memory: {
         rss: process.memoryUsage().rss
@@ -1184,7 +1222,7 @@ const server = http.createServer(async (req, res) => {
       const pool = getPostgresPool();
       if (!pool) return sendJson(res, 500, { error: "Database not connected." });
 
-      const dbRes = await pool.query("SELECT id, name, password_hash FROM users WHERE email = $1", [email]);
+      const dbRes = await pool.query("SELECT id, name, password_hash, last_otp_verified FROM users WHERE email = $1", [email]);
       if (dbRes.rows.length === 0) {
         return sendJson(res, 401, { error: "Invalid email or password." });
       }
@@ -1196,6 +1234,24 @@ const server = http.createServer(async (req, res) => {
 
       if (hash !== verifyHash) {
         return sendJson(res, 401, { error: "Invalid email or password." });
+      }
+
+      // Check if user verified OTP today (resets at midnight local time)
+      if (user.last_otp_verified) {
+        const lastVerifiedDate = new Date(user.last_otp_verified);
+        const today = new Date();
+        if (lastVerifiedDate.toDateString() === today.toDateString()) {
+          const token = jwt.sign(
+            { id: user.id, email, name: user.name },
+            process.env.JWT_SECRET || "super_secret_jwt_key",
+            { expiresIn: "24h" }
+          );
+          return sendJson(res, 200, {
+            success: true,
+            token,
+            user: { id: user.id, name: user.name, email }
+          });
+        }
       }
 
       // Generate secure 6-digit numeric OTP
@@ -1215,7 +1271,7 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 200, { success: true, message: "OTP sent" });
     } catch (err) {
       console.error("Login error:", err);
-      sendJson(res, 500, { error: "Internal server error." });
+      sendJson(res, 500, { error: "Internal server error.", details: err.message, stack: err.stack });
     }
     return;
   }
@@ -1270,6 +1326,9 @@ const server = http.createServer(async (req, res) => {
       }
 
       const user = dbRes.rows[0];
+
+      // Record successful OTP verification
+      await pool.query("UPDATE users SET last_otp_verified = CURRENT_TIMESTAMP WHERE id = $1", [user.id]);
 
       // Generate JWT
       const token = jwt.sign(
@@ -1334,6 +1393,92 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ── POST /api/auth/forgot-password ───────────────────
+  if ((url.pathname === "/api/auth/forgot-password" || url.pathname === "/forgot-password") && req.method === "POST") {
+    try {
+      const body = JSON.parse(await readBody(req));
+      const { email } = body;
+      if (!email) return sendJson(res, 400, { error: "Email is required." });
+
+      const rateLimitKey = `forgot:${email.toLowerCase().trim()}`;
+      const rateLimit = checkRateLimit(rateLimitKey, 2, 60 * 1000); // 2 per minute
+      if (rateLimit.limited) return sendJson(res, 429, { error: "Too many requests. Please wait." });
+
+      const pool = getPostgresPool();
+      if (!pool) return sendJson(res, 500, { error: "Database not connected." });
+
+      const dbRes = await pool.query("SELECT id FROM users WHERE email = $1", [email]);
+      if (dbRes.rows.length === 0) {
+        // Pretend it succeeded to prevent email enumeration
+        return sendJson(res, 200, { success: true, message: "If an account exists, an OTP was sent." });
+      }
+
+      const otp = generateOTP();
+      otpCache.setOTP(email, otp);
+
+      try {
+        await sendOTPEmail(email, otp);
+      } catch (emailErr) {
+        console.error("⚠️ Failed to send forgot password OTP email via SMTP:", emailErr.message);
+        console.log(`🔑 [DEV MODE] OTP generated for password reset: ${otp}`);
+      }
+
+      sendJson(res, 200, { success: true, message: "OTP sent" });
+    } catch (err) {
+      console.error("Forgot password error:", err);
+      sendJson(res, 500, { error: "Internal server error." });
+    }
+    return;
+  }
+
+  // ── POST /api/auth/reset-password ───────────────────
+  if ((url.pathname === "/api/auth/reset-password" || url.pathname === "/reset-password") && req.method === "POST") {
+    try {
+      const body = JSON.parse(await readBody(req));
+      const { email, otp, newPassword } = body;
+      if (!email || !otp || !newPassword) return sendJson(res, 400, { error: "Email, OTP, and new password are required." });
+
+      const rateLimitKey = `reset:${email.toLowerCase().trim()}`;
+      const rateLimit = checkRateLimit(rateLimitKey, 10, 60 * 1000);
+      if (rateLimit.limited) return sendJson(res, 429, { error: "Too many attempts. Please try again later." });
+
+      const cachedEntry = otpCache.getOTP(email);
+      if (!cachedEntry) return sendJson(res, 400, { error: "OTP has expired or does not exist. Please request a new code." });
+
+      if (cachedEntry.attempts >= 3) {
+        otpCache.deleteOTP(email);
+        return sendJson(res, 400, { error: "Too many failed attempts. OTP invalidated. Request a new one." });
+      }
+
+      if (cachedEntry.otp !== String(otp).trim()) {
+        otpCache.incrementAttempts(email);
+        return sendJson(res, 400, { error: "Invalid OTP." });
+      }
+
+      otpCache.deleteOTP(email);
+
+      const crypto = require("crypto");
+      const salt = crypto.randomBytes(16).toString("hex");
+      const hash = crypto.pbkdf2Sync(newPassword, salt, 1000, 64, "sha512").toString("hex");
+      const passwordHash = `${salt}:${hash}`;
+
+      const pool = getPostgresPool();
+      if (!pool) return sendJson(res, 500, { error: "Database not connected." });
+
+      const updateRes = await pool.query("UPDATE users SET password_hash = $1 WHERE email = $2 RETURNING id", [passwordHash, email]);
+
+      if (updateRes.rows.length === 0) {
+        return sendJson(res, 404, { error: "User not found." });
+      }
+
+      sendJson(res, 200, { success: true, message: "Password updated successfully" });
+    } catch (err) {
+      console.error("Reset password error:", err);
+      sendJson(res, 500, { error: "Internal server error." });
+    }
+    return;
+  }
+
   // ── GET /machines — return full machine master ─────────────────
   if (url.pathname === "/machines" && req.method === "GET") {
     if (!authenticateRequest(req, res)) return;
@@ -1391,9 +1536,9 @@ const server = http.createServer(async (req, res) => {
     if (!pool) { sendJson(res, 503, { error: "Database not configured." }); return; }
     try {
       const routingId = approvalMatch[1];
-      const action    = approvalMatch[2]; // approve | reject | modify
-      const bodyBuf   = await readBody(req);
-      const bodyJson  = bodyBuf.length ? JSON.parse(bodyBuf.toString("utf8")) : {};
+      const action = approvalMatch[2]; // approve | reject | modify
+      const bodyBuf = await readBody(req);
+      const bodyJson = bodyBuf.length ? JSON.parse(bodyBuf.toString("utf8")) : {};
       const { performedBy = "engineer", machineId, machineName, notes: stepNotes } = bodyJson;
 
       // Fetch current state for audit
@@ -1438,9 +1583,18 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  const isAnalyzeRoute = ["/analyze","/upload","/process","/api/analyze"].includes(url.pathname);
+  const isAnalyzeRoute = ["/analyze", "/upload", "/process", "/api/analyze"].includes(url.pathname);
   if (isAnalyzeRoute && (req.method === "POST" || req.method === "PUT")) {
     if (!authenticateRequest(req, res)) return;
+
+    res.on("error", (err) => {
+      if (["EOF", "ECONNRESET", "EPIPE"].includes(err.code)) {
+        console.warn(`[ANALYZE] Client disconnected early (${err.code})`);
+        return;
+      }
+      console.error("[ANALYZE] Response error:", err);
+    });
+
     try {
       const bodyBuffer = await readBody(req);
       const contentType = req.headers["content-type"] || "";
@@ -1516,8 +1670,6 @@ const server = http.createServer(async (req, res) => {
           };
         }
         console.log(`[AI] Prepared input — type:${file.contentType}, pdfPages:${file._pageCount || 0}, cropCount:${(file._crops || []).length}, vectorText:${(file._vectorText || "").length}`);
-        results.push({ ...analysisResult, fileName: file.filename });
-
         // Patch source filename — AI returns placeholder "__FILE__"
         if (analysisResult?.standardED?.source) {
           analysisResult.standardED.source.filename = file.filename;
@@ -1537,6 +1689,8 @@ const server = http.createServer(async (req, res) => {
         } catch (catErr) {
           console.warn("[CAT] Categorization failed:", catErr.message);
         }
+
+        results.push({ ...analysisResult, fileName: file.filename });
       }
 
       const comparison = results.length > 1 ? compareDocuments(results) : null;
@@ -1592,8 +1746,8 @@ const server = http.createServer(async (req, res) => {
                   `INSERT INTO drawing_features
                      (drawing_id, source_part, category, sub_category, name, value, unit, tolerance)
                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-                  [drawingId, f.sourcePart||null, f.category||null, f.subCategory||null,
-                   f.name||null, f.value!=null ? String(f.value) : null, f.unit||null, f.tolerance!=null ? String(f.tolerance) : null]
+                  [drawingId, f.sourcePart || null, f.category || null, f.subCategory || null,
+                    f.name || null, f.value != null ? String(f.value) : null, f.unit || null, f.tolerance != null ? String(f.tolerance) : null]
                 );
               }
               console.log("[DB] Insert Features");
@@ -1603,12 +1757,12 @@ const server = http.createServer(async (req, res) => {
             if (drawingId && cat) {
               await pool.query(
                 `INSERT INTO part_classifications
-                   (drawing_id, part_family, confidence, scores_json, manufacturing_cats)
-                 VALUES ($1,$2,$3,$4,$5)`,
+     (drawing_id, part_family, confidence, scores_json, manufacturing_cats)
+   VALUES ($1,$2,$3,$4,$5)`,
                 [
                   drawingId,
                   cat.partFamily || "UNKNOWN",
-                  cat.partFamilyConfidence || null,
+                  confidenceToScore(cat.partFamilyConfidence),
                   JSON.stringify(cat.partFamilyScores || {}),
                   cat.manufacturingCategories || [],
                 ]
@@ -1637,13 +1791,17 @@ const server = http.createServer(async (req, res) => {
               console.log("[DB] Insert Routing");
             }
 
-            console.log(`[DB] Saved drawing id=${drawingId} with ${cat?.features?.length||0} features, ${cat?.routingSuggestion?.length||0} routing steps`);
+            console.log(`[DB] Saved drawing id=${drawingId} with ${cat?.features?.length || 0} features, ${cat?.routingSuggestion?.length || 0} routing steps`);
           } catch (dbErr) {
             console.warn("[DB] Save failed (non-fatal):", dbErr.message);
           }
         }
       }
 
+      if (res.writableEnded || res.destroyed) {
+        console.warn("[ANALYZE] Client disconnected before PDF could be sent");
+        return;
+      }
       res.writeHead(200, {
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="engineering-report.pdf"`,
@@ -1664,7 +1822,7 @@ const server = http.createServer(async (req, res) => {
 
 async function startServer() {
   await connectDatabase();
-  
+
   server.listen(port, () => {
     console.log(`[SERVER] Running at http://localhost:${port}`);
     console.log(`[SERVER] Database: ${dbConnected ? "Connected" : "Disconnected"}`);
@@ -1701,8 +1859,8 @@ server.on("error", (err) => {
         { shell: "cmd.exe" }
       ).toString().trim();
       const pids = [...new Set(result.split(/\r?\n/).map(p => p.trim()).filter(Boolean))];
-      for (const pid of pids) { try { execSync(`taskkill /PID ${pid} /F`, { shell: "cmd.exe" }); } catch {} }
-    } catch {}
+      for (const pid of pids) { try { execSync(`taskkill /PID ${pid} /F`, { shell: "cmd.exe" }); } catch { } }
+    } catch { }
     setTimeout(() => { server.close(); startServer(); }, 500);
   } else {
     throw err;
