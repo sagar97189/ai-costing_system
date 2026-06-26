@@ -36,3 +36,15 @@
   transform: skewX(-25deg);
   animation: shine-effect 6s ease-in-out infinite;
 }
+
+@layer utilities {
+  .scrollbar-hide {
+    /* IE and Edge */
+    -ms-overflow-style: none;
+    /* Firefox */
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}

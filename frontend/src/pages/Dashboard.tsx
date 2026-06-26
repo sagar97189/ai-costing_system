@@ -114,8 +114,8 @@ export default function Dashboard() {
                     <kpi.icon className="w-5 h-5 text-brand-indigo" />
                   </div>
                   <div className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full ${(kpi.trend > 0 && !kpi.reverseTrendGood) || (kpi.trend < 0 && kpi.reverseTrendGood)
-                      ? 'bg-brand-success/10 text-brand-success'
-                      : 'bg-brand-danger/10 text-brand-danger'
+                    ? 'bg-brand-success/10 text-brand-success'
+                    : 'bg-brand-danger/10 text-brand-danger'
                     }`}>
                     {kpi.trend > 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
                     {Math.abs(kpi.trend)}%
@@ -274,9 +274,9 @@ export default function Dashboard() {
                       <td className="px-5 py-4 whitespace-nowrap text-sm text-gray-400">{row.date}</td>
                       <td className="px-5 py-4 whitespace-nowrap">
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${row.status === 'Won' ? 'bg-brand-success/10 text-brand-success border-brand-success/20' :
-                            row.status === 'Lost' ? 'bg-brand-danger/10 text-brand-danger border-brand-danger/20' :
-                              row.status === 'Quoted' ? 'bg-brand-info/10 text-brand-info border-brand-info/20' :
-                                'bg-brand-warning/10 text-brand-warning border-brand-warning/20'
+                          row.status === 'Lost' ? 'bg-brand-danger/10 text-brand-danger border-brand-danger/20' :
+                            row.status === 'Quoted' ? 'bg-brand-info/10 text-brand-info border-brand-info/20' :
+                              'bg-brand-warning/10 text-brand-warning border-brand-warning/20'
                           }`}>
                           {row.status}
                         </span>

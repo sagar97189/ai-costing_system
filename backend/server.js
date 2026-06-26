@@ -1236,11 +1236,11 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { error: "Invalid email or password." });
       }
 
-      // Check if user verified OTP within the last 24 hours
+      // Check if user verified OTP today (resets at midnight local time)
       if (user.last_otp_verified) {
-        const lastVerifiedTime = new Date(user.last_otp_verified).getTime();
-        const hours24 = 24 * 60 * 60 * 1000;
-        if (Date.now() - lastVerifiedTime < hours24) {
+        const lastVerifiedDate = new Date(user.last_otp_verified);
+        const today = new Date();
+        if (lastVerifiedDate.toDateString() === today.toDateString()) {
           const token = jwt.sign(
             { id: user.id, email, name: user.name },
             process.env.JWT_SECRET || "super_secret_jwt_key",
