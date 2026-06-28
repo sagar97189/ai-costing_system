@@ -1,4 +1,107 @@
-pymupdf
-pypdf
-jwt
-pg
+# =====================================================
+# ED AI Costing System - Complete Python Requirements
+# =====================================================
+
+# -----------------------------
+# PDF Processing
+# -----------------------------
+PyMuPDF==1.26.4
+pypdf==6.1.1
+pdf2image
+pdfplumber
+
+# -----------------------------
+# Core Numerical Libraries
+# -----------------------------
+numpy==1.26.4
+scipy
+pandas
+
+# -----------------------------
+# Computer Vision
+# -----------------------------
+opencv-python==4.6.0.66
+opencv-contrib-python==4.6.0.66
+Pillow
+scikit-image
+imutils
+
+# -----------------------------
+# OCR
+# -----------------------------
+paddlepaddle==3.2.0
+paddleocr==2.7.3
+
+# -----------------------------
+# Deep Learning
+# -----------------------------
+torch
+torchvision
+
+# -----------------------------
+# Object Detection (YOLO)
+# -----------------------------
+ultralytics
+
+# -----------------------------
+# Machine Learning
+# -----------------------------
+scikit-learn
+xgboost
+joblib
+
+# -----------------------------
+# Embeddings & Similarity Search
+# -----------------------------
+sentence-transformers
+transformers
+faiss-cpu
+
+# -----------------------------
+# Geometry Processing
+# -----------------------------
+shapely
+
+# -----------------------------
+# API Framework (Future-ready)
+# -----------------------------
+fastapi
+uvicorn
+python-multipart
+
+# -----------------------------
+# Database
+# -----------------------------
+psycopg2-binary
+SQLAlchemy
+alembic
+
+# -----------------------------
+# Environment & Configuration
+# -----------------------------
+python-dotenv
+PyYAML
+
+# -----------------------------
+# Utilities
+# -----------------------------
+requests
+tqdm
+aiofiles
+
+# -----------------------------
+# Logging & Validation
+# -----------------------------
+loguru
+pydantic
+
+# -----------------------------
+# Image Augmentation (Future)
+# -----------------------------
+albumentations
+
+# -----------------------------
+# Scientific Utilities
+# -----------------------------
+matplotlib
+networkx
