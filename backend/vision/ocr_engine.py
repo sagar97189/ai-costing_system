@@ -1,4 +1,7 @@
 import os
+os.environ["FLAGS_enable_pir_api"] = "0"
+os.environ["FLAGS_use_mkldnn"] = "0"
+os.environ["FLAGS_enable_onednn"] = "0"
 import cv2
 import numpy as np
 
@@ -11,7 +14,7 @@ class OCREngine:
         from paddleocr import PaddleOCR
         # Initialize PaddleOCR
         # use_angle_cls=True allows it to automatically detect text orientation
-        self.ocr = PaddleOCR(use_angle_cls=True, lang='en', show_log=False)
+        self.ocr = PaddleOCR(use_angle_cls=True,lang="en")
         
     def process(self, image_np):
         """
@@ -19,7 +22,7 @@ class OCREngine:
         Returns a list of dicts: [{'text': str, 'confidence': float, 'bbox': [x1, y1, x2, y2]}]
         """
         # PaddleOCR expects BGR format (standard OpenCV format)
-        results = self.ocr.ocr(image_np, cls=True)
+        results = self.ocr.ocr(image_np)
         
         extracted = []
         if not results or results[0] is None:

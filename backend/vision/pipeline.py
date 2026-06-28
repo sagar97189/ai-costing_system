@@ -127,3 +127,55 @@ class ImagePipeline:
         # Keep background white (255)
         rotated = cv2.warpAffine(image, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_CONSTANT, borderValue=(255, 255, 255))
         return rotated
+        
+    def extract_opencv_features(self, gray_img):
+        """Extracts basic geometric features (lines, circles, contours) using OpenCV."""
+        features = {
+            "circles": [],
+            "lines": [],
+            "contours": []
+        }
+        
+        # 1. Circle Detection
+        # HoughCircles expects an 8-bit, single-channel, grayscale image
+        # Adding a slight blur improves circle detection
+        blurred = cv2.GaussianBlur(gray_img, (9, 9), 2)
+        circles = cv2.HoughCircles(
+            blurred, cv2.HOUGH_GRADIENT, dp=1.2, minDist=30,
+            param1=50, param2=30, minRadius=5, maxRadius=200
+        )
+        if circles is not None:
+            circles = np.round(circles[0, :]).astype("int")
+            for (x, y, r) in circles:
+                features["circles"].append({"x": int(x), "y": int(y), "r": int(r)})
+                
+        # 2. Line Detection
+        edges = cv2.Canny(gray_img, 50, 150, apertureSize=3)
+        lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=80, minLineLength=50, maxLineGap=10)
+        if lines is not None:
+            for line in lines:
+                x1, y1, x2, y2 = line[0]
+                features["lines"].append({
+                    "start": {"x": int(x1), "y": int(y1)},
+                    "end": {"x": int(x2), "y": int(y2)}
+                })
+                
+        # 3. Contour Detection
+        # Threshold to binary inverted (so drawing features are white)
+        _, thresh = cv2.threshold(gray_img, 127, 255, cv2.THRESH_BINARY_INV)
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for c in contours:
+            area = cv2.contourArea(c)
+            if area > 100: # Filter out tiny noise
+                # Approximate the contour
+                peri = cv2.arcLength(c, True)
+                approx = cv2.approxPolyDP(c, 0.04 * peri, True)
+                x, y, w, h = cv2.boundingRect(c)
+                features["contours"].append({
+                    "area": float(area),
+                    "bbox": {"x": int(x), "y": int(y), "w": int(w), "h": int(h)},
+                    "vertices": len(approx)
+                })
+                
+        return features
+

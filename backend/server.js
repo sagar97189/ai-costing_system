@@ -16,7 +16,6 @@ const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
 const jwt = require("jsonwebtoken");
-const { assignMachines, getAllMachines } = require("./machine-master");
 const { generateOTP } = require("./src/utils/otpGenerator");
 const otpCache = require("./src/cache/otpCache");
 const { sendOTPEmail } = require("./src/services/emailService");
@@ -748,43 +747,43 @@ const server = http.createServer(async (req, res) => {
   if (isUploadRoute && req.method === "POST") {
     // We disable auth check here temporarily for testing, or you can uncomment it
     // if (!authMiddleware(req, res, () => {})) return;
-    
+
     const { formidable } = require("formidable");
     const uploadDir = path.join(__dirname, "uploads");
     if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
-    
+
     const form = formidable({
       uploadDir,
       keepExtensions: true,
       maxFileSize: 50 * 1024 * 1024, // 50MB
     });
-    
+
     form.parse(req, (err, fields, files) => {
       if (err) {
         return sendJson(res, 400, { success: false, error: "File upload failed", details: err.message });
       }
-      
+
       const file = files.file || files.drawing;
       // Formidable v3 returns arrays for files
       const fileData = Array.isArray(file) ? file[0] : file;
-      
+
       if (!fileData) {
         return sendJson(res, 400, { success: false, error: "No file uploaded" });
       }
-      
+
       const inputPath = fileData.filepath;
       const pythonExe = path.join(__dirname, "vision", "venv", "Scripts", "python.exe");
       const scriptPath = path.join(__dirname, "vision", "opencv_engine.py");
-      
+
       console.log(`[UPLOAD] Processing file: ${fileData.originalFilename}`);
-      
+
       const { execFile } = require("child_process");
       execFile(pythonExe, [scriptPath, inputPath, "--output_dir", uploadDir], (error, stdout, stderr) => {
         if (error) {
           console.error(`[OPENCV] Error: ${stderr || error.message}`);
           return sendJson(res, 500, { success: false, error: "Image processing failed", details: stderr || error.message });
         }
-        
+
         try {
           const result = JSON.parse(stdout);
           return sendJson(res, 200, result);
@@ -797,56 +796,126 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // --- Static file serving for uploads/debug ---
+  if (url.pathname.startsWith("/uploads/debug/")) {
+    const filePath = path.join(__dirname, "uploads", "debug", url.pathname.replace("/uploads/debug/", ""));
+    if (fs.existsSync(filePath)) {
+      const ext = path.extname(filePath).toLowerCase();
+      let contentType = "application/octet-stream";
+      if (ext === ".png") contentType = "image/png";
+      else if (ext === ".jpg" || ext === ".jpeg") contentType = "image/jpeg";
+      else if (ext === ".json") contentType = "application/json";
+      
+      res.writeHead(200, { "Content-Type": contentType });
+      fs.createReadStream(filePath).pipe(res);
+      return;
+    }
+  }
+
+  // --- GET Debug Route ---
+  const debugMatch = url.pathname.match(/^\/api\/process-drawing\/(.+)\/debug$/);
+  if (debugMatch && req.method === "GET") {
+    const jobId = debugMatch[1];
+    const fullJsonPath = path.join(__dirname, "uploads", "debug", `${jobId}_full.json`);
+    
+    if (!fs.existsSync(fullJsonPath)) {
+      return sendJson(res, 404, { error: "Debug data not found for this job ID" });
+    }
+    
+    try {
+      const fullJson = JSON.parse(fs.readFileSync(fullJsonPath, "utf8"));
+      const summary = {
+        title_block: fullJson.features?.title_block || {},
+        bom_table: fullJson.features?.bom_table || [],
+        dimensions: fullJson.features?.dimensions || {},
+        materials: fullJson.features?.materials || [],
+        notes: fullJson.features?.notes || [],
+        standard_ed_draft: fullJson.standard_ed_draft || {}
+      };
+      
+      return sendJson(res, 200, {
+        ocr_debug_image: `/uploads/debug/${jobId}_ocr_debug.png`,
+        summary: summary
+      });
+    } catch (err) {
+      return sendJson(res, 500, { error: "Failed to parse saved debug data" });
+    }
+  }
+
   const isProcessRoute = ["/api/process-drawing"].includes(url.pathname);
   if (isProcessRoute && req.method === "POST") {
     // We disable auth check here temporarily for testing, or you can uncomment it
     // if (!authMiddleware(req, res, () => {})) return;
-    
+
     const { formidable } = require("formidable");
     const uploadDir = path.join(__dirname, "uploads");
     if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
-    const debugDir = path.join(__dirname, "vision", "debug");
-    
+    const debugDir = path.join(uploadDir, "debug");
+    if (!fs.existsSync(debugDir)) fs.mkdirSync(debugDir);
+
     const form = formidable({
       uploadDir,
       keepExtensions: true,
       maxFileSize: 50 * 1024 * 1024, // 50MB
     });
-    
+
     form.parse(req, (err, fields, files) => {
       if (err) {
         return sendJson(res, 400, { success: false, error: "File upload failed", details: err.message });
       }
-      
+
       const file = files.file || files.drawing;
       const fileData = Array.isArray(file) ? file[0] : file;
-      
+
       if (!fileData) {
         return sendJson(res, 400, { success: false, error: "No file uploaded" });
       }
-      
+
       const inputPath = fileData.filepath;
+      const baseName = path.parse(fileData.originalFilename || "upload").name.replace(/[^a-zA-Z0-9_-]/g, "_");
+      const timestamp = Date.now();
+      const jobId = `${baseName}_${timestamp}`;
+      
+      const newPath = path.join(uploadDir, `${jobId}${path.extname(inputPath)}`);
+      fs.renameSync(inputPath, newPath);
+      
       const pythonExe = path.join(__dirname, "vision", "venv", "Scripts", "python.exe");
       const scriptPath = path.join(__dirname, "vision", "orchestrator.py");
-      
-      console.log(`[PROCESS-DRAWING] Orchestrating: ${fileData.originalFilename}`);
-      
+
+      console.log(`[PROCESS-DRAWING] Orchestrating: ${fileData.originalFilename} (JobID: ${jobId})`);
+
       const { execFile } = require("child_process");
-      execFile(pythonExe, [scriptPath, inputPath, "--output_dir", debugDir, "--debug"], { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      execFile(pythonExe, [scriptPath, newPath, "--output_dir", debugDir, "--debug"], { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
         if (error && !stdout) {
           console.error(`[ORCHESTRATOR] Error: ${stderr || error.message}`);
           return sendJson(res, 500, { success: false, error: "Multi-stage processing failed", details: stderr || error.message });
         }
-        
+
         try {
-          // PaddleOCR prints model downloading logs to stdout on first run.
-          // We find the first '{' which starts our unified JSON response
           const jsonStart = stdout.indexOf('{');
           if (jsonStart === -1) throw new Error("No JSON response found in stdout");
           const jsonStr = stdout.substring(jsonStart);
-          
+
           const result = JSON.parse(jsonStr);
-          return sendJson(res, 200, result);
+          
+          const fullJsonPath = path.join(debugDir, `${jobId}_full.json`);
+          fs.writeFileSync(fullJsonPath, JSON.stringify(result, null, 2));
+
+          const summary = {
+            title_block: result.features?.title_block || {},
+            bom_table: result.features?.bom_table || [],
+            dimensions: result.features?.dimensions || {},
+            materials: result.features?.materials || [],
+            notes: result.features?.notes || []
+          };
+
+          return sendJson(res, 200, {
+            success: true,
+            job_id: jobId,
+            summary: summary,
+            debug_image_url: `/uploads/debug/${jobId}_ocr_debug.png`,
+            full_json_available: true
+          });
         } catch (parseError) {
           console.error(`[ORCHESTRATOR] JSON Parse Error: ${parseError.message}`, stdout);
           return sendJson(res, 500, { success: false, error: "Invalid response from Orchestrator", raw: stdout });

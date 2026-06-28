@@ -6,8 +6,8 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
-backend\.env
-frontend\.env
+backend/.env
+frontend/.env
 .env.test
 
 
@@ -29,3 +29,22 @@ dist-ssr
 *.sw?
 frontend/.env
 backend/.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.venv/
+backend/vision/venv/
+
+# Debug outputs
+*.png
+*.jpg
+*.jpeg
+debug/
+output/
+uploads/
