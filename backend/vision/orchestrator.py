@@ -60,7 +60,7 @@ def main():
             
         # 4. Extraction Engine
         extractor = Extractor()
-        features, confidence_summary, full_text = extractor.extract_features(ocr_tokens)
+        features, confidence_summary, full_text = extractor.extract_features(ocr_tokens, opencv_features)
         
         # 5. Format response
         response = {

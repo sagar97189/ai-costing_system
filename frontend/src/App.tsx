@@ -734,6 +734,7 @@ import RFQs from './pages/RFQs';
 import Analytics from './pages/Analytics';
 import Suppliers from './pages/Suppliers';
 import Quotes from './pages/Quotes';
+import DebugExtraction from './pages/DebugExtraction';
 
 function App() {
   return (
@@ -742,6 +743,7 @@ function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Login initialView="signup" />} />
+        <Route path="/debug-extraction" element={<DebugExtraction />} />
 
         {/* Protected Dashboard Routes */}
         <Route path="/dashboard" element={<DashboardLayout />}>
