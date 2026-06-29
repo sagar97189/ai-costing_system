@@ -71,3 +71,9 @@ export default defineConfig([
   },
 ])
 ```
+
+<!-- python venv 
+ -->
+PS C:\Users\Admin\Desktop\ai-costing_system> python -m venv venv
+PS C:\Users\Admin\Desktop\ai-costing_system> .\venv\Scripts\activate
+(venv) PS C:\Users\Admin\Desktop\ai-costing_system> pip install -r  requirements.txt

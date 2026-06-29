@@ -1,5 +1,6 @@
 import re
 import math
+from collections import defaultdict
 
 class Extractor:
     def __init__(self):
@@ -11,9 +12,21 @@ class Extractor:
         y_dist = max(0, max(b1[1], b2[1]) - min(b1[3], b2[3]))
         return math.sqrt(x_dist**2 + y_dist**2)
 
-    def extract_features(self, ocr_data, opencv_features=None):
+    def is_inside(self, pt_box, roi_box):
+        px1, py1, px2, py2 = pt_box
+        rx, ry, rw, rh = roi_box
+        rx2, ry2 = rx + rw, ry + rh
+        
+        # Center of token
+        cx = (px1 + px2) / 2
+        cy = (py1 + py2) / 2
+        
+        return rx <= cx <= rx2 and ry <= cy <= ry2
+
+    def extract_features(self, ocr_data, opencv_features=None, rois=None):
         features = {
             "title_block": {},
+            "bom_table": [],
             "dimensions": [],
             "materials": [],
             "surface_finish": [],
@@ -21,17 +34,24 @@ class Extractor:
             "rejected_candidates": []
         }
         
+        if not rois:
+            rois = []
+            
         confidence_summary = {}
         full_text_list = []
-        tb_keywords = ["REV", "DWG NO", "PART NO", "QTY", "SCALE"]
+        tb_keywords = ["REV", "DWG NO", "PART NO", "QTY", "SCALE", "MATERIAL", "TITLE", "DRAWN BY", "DATE", "WEIGHT"]
         materials_pattern = r'\b(MS|SS304|SS316|EN8|AL|CI|ALUMINIUM|STEEL)\b'
         surface_finish_pattern = r'(?:Ra|Rz)\s*(\d+(?:\.\d+)?)'
 
         if not opencv_features:
             opencv_features = {"circles": [], "lines": [], "contours": []}
 
-        candidates = []
+        # Spatial grouping
+        bom_tokens = []
+        notes_tokens = []
+        tb_tokens = []
         other_tokens = []
+        candidates = []
 
         for item in ocr_data:
             text = item.get("text", "").strip()
@@ -56,35 +76,129 @@ class Extractor:
 
             item["clean_text"] = clean_text
             item["text_upper"] = text_upper
-
-            is_tb = False
-            for kw in tb_keywords:
-                if kw in text_upper:
-                    features["title_block"][kw] = clean_text
-                    is_tb = True
             
-            if is_tb:
+            # Map token to ROI
+            matched_roi = None
+            for roi in rois:
+                if self.is_inside(bbox, roi['box']):
+                    matched_roi = roi['type']
+                    break
+                    
+            if matched_roi == 'bom_table':
+                bom_tokens.append(item)
                 continue
-
+            elif matched_roi == 'dimension_area':
+                # Treat dimension area notes specifically
+                notes_tokens.append(item)
+            elif matched_roi == 'title_block':
+                tb_tokens.append(item)
+            
+            # Legacy general extraction (runs for all non-BOM tokens)
             mat_match = re.search(materials_pattern, text_upper)
             if mat_match:
                 features["materials"].append({"value": mat_match.group(0), "confidence": conf})
-                continue
                 
             sf_match = re.search(surface_finish_pattern, clean_text)
             if sf_match:
                 features["surface_finish"].append({"value": sf_match.group(0), "confidence": conf})
-                continue
                 
             if "NOTE" in text_upper:
                 features["notes"].append(clean_text)
-                continue
             
             if re.search(r'\d', clean_text):
                 candidates.append(item)
             else:
                 other_tokens.append(item)
 
+        # -----------------------------
+        # Parse BOM Table
+        # -----------------------------
+        if not bom_tokens:
+            # Fallback: look for BOM headers like "ITEM", "QTY", "DESCRIPTION"
+            for t in other_tokens + candidates + tb_tokens:
+                if re.search(r'\b(ITEM|DESCRIPTION|QTY\.)\b', t['text_upper']):
+                    # Assume BOM is a table in the right half of the page, above or around this token
+                    bx1, by1, bx2, by2 = t['bbox']
+                    # Grab everything in the same general vertical column (right side)
+                    for pt in ocr_data:
+                        if pt['bbox'][0] > bx1 - 200: # on the right side
+                            bom_tokens.append(pt)
+                    break
+                    
+        if bom_tokens:
+            # Group by Y coordinate (rows)
+            bom_tokens.sort(key=lambda t: t['bbox'][1])
+            rows = []
+            current_row = []
+            last_y = -1
+            
+            for token in bom_tokens:
+                cy = (token['bbox'][1] + token['bbox'][3]) / 2
+                if last_y == -1 or abs(cy - last_y) < 25: # 25px row threshold (increased for large images)
+                    current_row.append(token)
+                    if last_y == -1: last_y = cy
+                    else: last_y = (last_y + cy) / 2
+                else:
+                    rows.append(current_row)
+                    current_row = [token]
+                    last_y = cy
+            if current_row:
+                rows.append(current_row)
+                
+            for row in rows:
+                row.sort(key=lambda t: t['bbox'][0]) # Sort left-to-right
+                row_text = [t['text'] for t in row]
+                # Try to filter out noise, only keep rows with at least 2 items
+                if len(row_text) > 1:
+                    features["bom_table"].append(row_text)
+
+        # -----------------------------
+        # Parse Title Block Spatial Pairs
+        # -----------------------------
+        # Fallback if ROI detector completely failed
+        if not tb_tokens:
+            tb_tokens = ocr_data
+            
+        if tb_tokens:
+            for tb_t in tb_tokens:
+                tu = tb_t['text_upper']
+                for kw in tb_keywords:
+                    if kw in tu:
+                        # Find nearest token to the right OR directly below
+                        right_tokens = [t for t in tb_tokens if t['bbox'][0] >= tb_t['bbox'][0] - 50 and t['bbox'][1] >= tb_t['bbox'][1] - 20 and t != tb_t]
+                        
+                        val_candidate = tu.replace(kw, '').strip(" :.-")
+                        has_digits = any(char.isdigit() for char in val_candidate)
+                        
+                        # Use nearest right token first, UNLESS the current token explicitly contains a value (e.g. digits)
+                        if right_tokens and not has_digits:
+                            # sort by Euclidean distance
+                            right_tokens.sort(key=lambda t: self.bbox_distance(tb_t['bbox'], t['bbox']))
+                            features["title_block"][kw] = right_tokens[0]['clean_text']
+                        elif val_candidate:
+                            features["title_block"][kw] = tb_t['clean_text'].replace(kw, '', 1).replace(kw.lower(), '', 1).strip(" :.-")
+                        elif right_tokens:
+                            # Fallback if val_candidate is empty but there are right tokens
+                            right_tokens.sort(key=lambda t: self.bbox_distance(tb_t['bbox'], t['bbox']))
+                            features["title_block"][kw] = right_tokens[0]['clean_text']
+                        else:
+                            # Just use itself if no right token
+                            features["title_block"][kw] = tb_t['clean_text']
+                        break
+
+        # -----------------------------
+        # Notes Area Parsing
+        # -----------------------------
+        if notes_tokens:
+            notes_tokens.sort(key=lambda t: (t['bbox'][1] // 20, t['bbox'][0]))
+            note_str = " ".join([t['clean_text'] for t in notes_tokens])
+            if note_str.strip():
+                features["notes"].append(note_str.strip())
+
+
+        # -----------------------------
+        # Dimensions Parsing (Legacy Logic)
+        # -----------------------------
         for cand in candidates:
             raw_text = cand["text"]
             clean_text = cand["clean_text"]
@@ -321,4 +435,3 @@ class Extractor:
 
         final_confidence = {"overall": 0.9}
         return features, final_confidence, "\n".join(full_text_list)
-

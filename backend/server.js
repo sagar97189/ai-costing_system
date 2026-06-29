@@ -805,7 +805,7 @@ const server = http.createServer(async (req, res) => {
       if (ext === ".png") contentType = "image/png";
       else if (ext === ".jpg" || ext === ".jpeg") contentType = "image/jpeg";
       else if (ext === ".json") contentType = "application/json";
-      
+
       res.writeHead(200, { "Content-Type": contentType });
       fs.createReadStream(filePath).pipe(res);
       return;
@@ -817,11 +817,11 @@ const server = http.createServer(async (req, res) => {
   if (debugMatch && req.method === "GET") {
     const jobId = debugMatch[1];
     const fullJsonPath = path.join(__dirname, "uploads", "debug", `${jobId}_full.json`);
-    
+
     if (!fs.existsSync(fullJsonPath)) {
       return sendJson(res, 404, { error: "Debug data not found for this job ID" });
     }
-    
+
     try {
       const fullJson = JSON.parse(fs.readFileSync(fullJsonPath, "utf8"));
       const summary = {
@@ -832,7 +832,7 @@ const server = http.createServer(async (req, res) => {
         notes: fullJson.features?.notes || [],
         standard_ed_draft: fullJson.standard_ed_draft || {}
       };
-      
+
       return sendJson(res, 200, {
         ocr_debug_image: `/uploads/debug/${jobId}_ocr_debug.png`,
         summary: summary
@@ -875,10 +875,10 @@ const server = http.createServer(async (req, res) => {
       const baseName = path.parse(fileData.originalFilename || "upload").name.replace(/[^a-zA-Z0-9_-]/g, "_");
       const timestamp = Date.now();
       const jobId = `${baseName}_${timestamp}`;
-      
+
       const newPath = path.join(uploadDir, `${jobId}${path.extname(inputPath)}`);
       fs.renameSync(inputPath, newPath);
-      
+
       const pythonExe = path.join(__dirname, "vision", "venv", "Scripts", "python.exe");
       const scriptPath = path.join(__dirname, "vision", "orchestrator.py");
 
@@ -897,7 +897,7 @@ const server = http.createServer(async (req, res) => {
           const jsonStr = stdout.substring(jsonStart);
 
           const result = JSON.parse(jsonStr);
-          
+
           const fullJsonPath = path.join(debugDir, `${jobId}_full.json`);
           fs.writeFileSync(fullJsonPath, JSON.stringify(result, null, 2));
 
